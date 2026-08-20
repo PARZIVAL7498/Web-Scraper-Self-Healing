@@ -84,21 +84,37 @@ GEMINI_API_KEY=your_gemini_api_key_here
 
 ## 🏃 Running the Pipeline
 
-### Step 1: Run the Self-Healing Scraper Loop
+### ⚡ 1-Click All-in-One Initiation (Recommended)
+Automate all setup, self-healing scraper runs, ChromaDB indexing, and start the chatbot web server with **a single command**:
+
+```bash
+python start.py
+```
+*(On Windows CMD / PowerShell, you can also run `.\run.bat` or `.\run.ps1`)*
+
+This script automatically:
+1. Verifies `.env` environment variables.
+2. Runs `scripts/heal_loop.py` to scrape, validate, self-heal, and embed vectors in ChromaDB.
+3. Launches the FastAPI Chatbot app on `http://localhost:8000`.
+4. Automatically opens the app in your default browser.
+
+#### Handy Options for `start.py`:
+- **Skip scraper run & start server immediately**: `python start.py --skip-heal`
+- **Demo mock self-heal loop**: `python start.py --mock-unhealthy`
+- **Custom port**: `python start.py --port 8080`
+
+---
+
+### Manual Step-by-Step Run (Optional)
+
+#### Step 1: Run the Self-Healing Scraper Loop
 ```bash
 python scripts/heal_loop.py
 ```
-This script will:
-1. Run `bdata scraper run <COLLECTOR_ID> <URL>`.
-2. Check health against `data/last_known_good.json`.
-3. If unhealthy, trigger `bdata scraper heal` & `bdata scraper approve`, then retry.
-4. If healthy, update baseline & populate ChromaDB vector store.
 
-*(Tip: Pass `--mock` to run without `bdata` installed).*
-
-### Step 2: Start the RAG Chatbot
+#### Step 2: Start the RAG Chatbot
 ```bash
-uvicorn chatbot.app:app --reload --port 8000
+python -m uvicorn chatbot.app:app --reload --port 8000
 ```
 Open your browser to: **`http://localhost:8000`**
 
