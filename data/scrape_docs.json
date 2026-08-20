@@ -1,0 +1,17 @@
+[
+  {
+    "url": "https://docs.render.com/",
+    "title": "Docs Documentation Overview",
+    "content": "Official documentation overview for Docs. Describes core architecture, installation steps, and API features."
+  },
+  {
+    "url": "https://docs.render.com/getting-started",
+    "title": "Getting Started with Docs",
+    "content": "Guide to integrating Docs into your software stack with setup instructions and code examples."
+  },
+  {
+    "url": "https://docs.render.com/api-reference",
+    "title": "Docs API & SQL Reference",
+    "content": "Complete reference manual for Docs functions, data types, query capabilities, and configuration options."
+  }
+]

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# Data & Vector DB output
+data/latest_scrape.json
+data/chroma_db/
+*.db
+*.sqlite3
+
+# Environment & Secrets
+.env
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/

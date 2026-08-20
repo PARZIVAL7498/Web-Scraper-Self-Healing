@@ -1,0 +1,22 @@
+[
+  {
+    "url": "https://clickhouse.com/docs/",
+    "title": "Clickhouse Technical Overview & Architecture",
+    "content": "Official documentation overview for Clickhouse. Describes core concepts, architecture, and developer features."
+  },
+  {
+    "url": "https://clickhouse.com/docs/getting-started",
+    "title": "Getting Started & Installation Guide for Clickhouse",
+    "content": "Installation guide for Clickhouse. Package installation instructions, initialization setup, and environment configurations."
+  },
+  {
+    "url": "https://clickhouse.com/docs/crud",
+    "title": "Clickhouse Data Management & CRUD Operations",
+    "content": "CRUD operations reference for Clickhouse. Create, Read, Update, and Delete methods."
+  },
+  {
+    "url": "https://clickhouse.com/docs/security",
+    "title": "Clickhouse Security, Tokens & Permissions",
+    "content": "Security model for Clickhouse. Access controls, authentication tokens, and API key management."
+  }
+]

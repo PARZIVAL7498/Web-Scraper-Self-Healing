@@ -1,0 +1,17 @@
+[
+  {
+    "url": "https://supabase.com/docs/",
+    "title": "Supabase Overview & Architecture",
+    "content": "Supabase is an open-source Firebase alternative built on PostgreSQL, providing real-time database subscriptions, instant REST/GraphQL APIs, Auth, and Storage."
+  },
+  {
+    "url": "https://supabase.com/docs/crud",
+    "title": "Supabase Database CRUD Operations",
+    "content": "Perform CRUD in Supabase using `@supabase/supabase-js`:\n\u2022 Create: `const { data } = await supabase.from('todos').insert([{ task: 'Buy milk' }])`\n\u2022 Read: `const { data } = await supabase.from('todos').select('*').eq('completed', false)`\n\u2022 Update: `const { data } = await supabase.from('todos').update({ completed: true }).eq('id', 1)`\n\u2022 Delete: `const { data } = await supabase.from('todos').delete().eq('id', 1)`."
+  },
+  {
+    "url": "https://supabase.com/docs/auth",
+    "title": "Supabase Authentication & Row Level Security (RLS)",
+    "content": "Supabase provides built-in email/password, OAuth, and Magic Link authentication. Secure data using PostgreSQL Row Level Security (RLS) policies: `CREATE POLICY \"Users can view own data\" ON todos FOR SELECT USING (auth.uid() = user_id)`."
+  }
+]

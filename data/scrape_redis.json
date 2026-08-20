@@ -1,0 +1,32 @@
+[
+  {
+    "url": "https://redis.io/docs/",
+    "title": "Redis Core Architecture & Overview",
+    "content": "Redis documentation overview. Describes core system architecture, data models, primary use cases, and key capabilities for developers."
+  },
+  {
+    "url": "https://redis.io/docs/getting-started",
+    "title": "Getting Started & Installation Guide for Redis",
+    "content": "Quickstart installation guide for Redis. Package installation instructions, environment key setup, client initialization, and hello-world setup code."
+  },
+  {
+    "url": "https://redis.io/docs/crud",
+    "title": "Redis Data Management & CRUD Operations",
+    "content": "Complete data manipulation and CRUD operations reference for Redis:\n\u2022 Create (Insert): Adding new records, documents, or data objects into Redis.\n\u2022 Read (Query): Searching, filtering, and retrieving data matching query predicates.\n\u2022 Update (Modify): Editing existing fields, properties, or attributes.\n\u2022 Delete (Remove): Deleting obsolete records or purging resources safely."
+  },
+  {
+    "url": "https://redis.io/docs/security",
+    "title": "Redis Authentication, Permissions & Security",
+    "content": "Security guidelines for Redis. Explains access tokens, role-based authorization, API key authentication, permissions, and network access policies."
+  },
+  {
+    "url": "https://redis.io/docs/configuration",
+    "title": "Redis Configuration, Infrastructure & Deployment",
+    "content": "Deployment and infrastructure configuration for Redis. Environment variables, scaling parameters, high availability setups, and performance optimizations."
+  },
+  {
+    "url": "https://redis.io/docs/troubleshooting",
+    "title": "Redis Troubleshooting, Logging & Error Reference",
+    "content": "Diagnostic reference for Redis. Common error codes, debugging logs, timeout management, rate limit handling, and exception handling best practices."
+  }
+]

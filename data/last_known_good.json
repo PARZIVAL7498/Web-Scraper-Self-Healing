@@ -1,0 +1,22 @@
+[
+  {
+    "url": "https://duckdb.org/docs/",
+    "title": "Duckdb Technical Overview & Architecture",
+    "content": "Official documentation overview for Duckdb. Describes core concepts, architecture, and developer features."
+  },
+  {
+    "url": "https://duckdb.org/docs/getting-started",
+    "title": "Getting Started & Installation Guide for Duckdb",
+    "content": "Installation guide for Duckdb. Package installation instructions, initialization setup, and environment configurations."
+  },
+  {
+    "url": "https://duckdb.org/docs/crud",
+    "title": "Duckdb Data Management & CRUD Operations",
+    "content": "CRUD operations reference for Duckdb. Create, Read, Update, and Delete methods."
+  },
+  {
+    "url": "https://duckdb.org/docs/security",
+    "title": "Duckdb Security, Tokens & Permissions",
+    "content": "Security model for Duckdb. Access controls, authentication tokens, and API key management."
+  }
+]

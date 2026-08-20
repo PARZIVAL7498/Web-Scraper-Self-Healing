@@ -1,0 +1,7 @@
+[
+  {
+    "url": "https://docs.deno.com/",
+    "title": "Deno Runtime Documentation",
+    "content": "Deno is a modern, secure runtime for JavaScript and TypeScript built on V8 and Rust, with built-in Web API support, package manager, and test runner."
+  }
+]
