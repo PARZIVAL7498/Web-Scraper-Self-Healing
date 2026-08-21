@@ -56,7 +56,11 @@ def extract_competitor_tag(url: str) -> str:
 
 
 def split_text_into_chunks(text: str, chunk_size: int = 500, chunk_overlap: int = 50) -> List[str]:
-    """Splits a document text string into overlapping paragraph chunks."""
+    """Splits a document text string into overlapping paragraph chunks.
+
+    Tiny heading-only fragments are merged into the following chunk so retrieval
+    never returns a bare section title without the explanatory body/code.
+    """
     if not text:
         return []
 
@@ -79,7 +83,23 @@ def split_text_into_chunks(text: str, chunk_size: int = 500, chunk_overlap: int 
     if current_chunk:
         chunks.append(current_chunk)
 
-    return chunks
+    # Merge heading-only / ultra-short chunks into the next body chunk
+    merged: List[str] = []
+    i = 0
+    while i < len(chunks):
+        chunk = chunks[i]
+        is_heading_only = (
+            len(chunk) < 80
+            or (chunk.lstrip().startswith("###") and "\n" not in chunk.strip() and len(chunk) < 120)
+        )
+        if is_heading_only and i + 1 < len(chunks):
+            merged.append(chunk + "\n\n" + chunks[i + 1])
+            i += 2
+        else:
+            merged.append(chunk)
+            i += 1
+
+    return merged
 
 
 def chunk_and_embed(input_path: Path = DEFAULT_INPUT_PATH, competitor_tag: str = None) -> int:
@@ -147,6 +167,18 @@ def chunk_and_embed(input_path: Path = DEFAULT_INPUT_PATH, competitor_tag: str =
     )
 
     print(f"[CHUNK_EMBED] ⚙️ Upserting {total_chunks} chunks into ChromaDB collection '{COLLECTION_NAME}'...")
+
+    # Replace prior vectors for this competitor so stale stub/mock pages cannot pollute retrieval
+    tag_for_delete = competitor_tag if competitor_tag else extract_competitor_tag(pages[0].get("url", ""))
+    try:
+        existing = collection.get(where={"competitor": tag_for_delete})
+        old_ids = existing.get("ids") or []
+        if old_ids:
+            collection.delete(ids=old_ids)
+            print(f"[CHUNK_EMBED] 🧹 Removed {len(old_ids)} stale chunks for competitor '{tag_for_delete}'")
+    except Exception as e:
+        print(f"[CHUNK_EMBED] ⚠️ Stale-chunk cleanup skipped: {e}")
+
     collection.upsert(
         documents=documents,
         metadatas=metadatas,

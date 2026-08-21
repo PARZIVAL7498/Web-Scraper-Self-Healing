@@ -32,11 +32,15 @@ jobs:
 
       - name: Install Bright Data CLI (if credentials provided)
         run: |
-          # Install bdata CLI globally if needed
-          npm install -g @brightdata/bdata-cli || true
+          npm install -g @brightdata/cli || true
+          if [ -n "${{ secrets.BRIGHTDATA_API_KEY }}" ]; then
+            bdata login --api-key "${{ secrets.BRIGHTDATA_API_KEY }}" || true
+          fi
 
       - name: Run Self-Healing Scraper & Vector Indexing Pipeline
         env:
+          BRIGHTDATA_API_KEY: ${{ secrets.BRIGHTDATA_API_KEY }}
+          BRIGHTDATA_ZONE: ${{ vars.BRIGHTDATA_ZONE || 'cli_unlocker' }}
           BRIGHTDATA_COLLECTOR_ID: ${{ secrets.BRIGHTDATA_COLLECTOR_ID }}
           TARGET_URL: ${{ vars.TARGET_URL || 'https://duckdb.org/docs/' }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

@@ -1,15 +1,34 @@
-# ⚡ Self-Healing Docs-to-RAG Chatbot
+# Self-Healing Docs-to-RAG Chatbot
 
-An end-to-end self-healing documentation scraper and RAG chatbot built with **Bright Data Scraper Studio CLI (`bdata`)**, **ChromaDB**, **FastAPI**, and **GitHub Actions**.
+End-to-end **Bright Data Scraper Studio** (`bdata`) pipeline: scrape → health-check → **real `bdata scraper heal`** → embed → OpenRouter RAG with citations.
+
+**Pinned collector:** [`c_mt2z0drp1irsde3ydk`](https://brightdata.com/cp/scrapers/c_mt2z0drp1irsde3ydk)  
+**Proof:** [`docs/proof_self_heal_transcript.txt`](docs/proof_self_heal_transcript.txt) · [`data/proof_bdata_run.json`](data/proof_bdata_run.json)  
+**90s demo:** [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md)
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
 ![Bright Data](https://img.shields.io/badge/Bright%20Data-Scraper%20Studio-orange)
-![Vector DB](https://img.shields.io/badge/VectorDB-Chroma-purple)
+![Vector DB](https://img.shields.io/badge/VectorDB-Chroma-green)
 ![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-blue)
 
 ---
 
-## 📐 Architecture Diagram
+## Judge path (one command)
+
+```bash
+npm i -g @brightdata/cli && bdata login --api-key $BRIGHTDATA_API_KEY
+pip install -r requirements.txt
+# .env must set BRIGHTDATA_COLLECTOR_ID=c_mt2z0drp1irsde3ydk + OPENROUTER_API_KEY
+python -m uvicorn chatbot.app:app --host 127.0.0.1 --port 8000
+```
+
+Open http://127.0.0.1:8000 → confirm collector + engine in sidebar → **Break & self-heal** (timeline polls real phases) → ask a docs question with citations.
+
+Studio-first (`SCRAPE_ALLOW_FALLBACK=0`). Unlocker/HTTP only as emergency fallback.
+
+---
+
+## Architecture
 
 ```
                               ┌────────────────────────┐
@@ -51,49 +70,48 @@ An end-to-end self-healing documentation scraper and RAG chatbot built with **Br
 
 ---
 
-## 🚀 Quickstart & Setup
+## Setup
 
 ### 1. Prerequisites
-- Python 3.10+ installed
-- Node.js & Bright Data CLI (`bdata`):
+- Python 3.10+
+- Bright Data CLI:
   ```bash
-  npm install -g @brightdata/bdata-cli
+  npm install -g @brightdata/cli
+  bdata login --api-key YOUR_API_KEY
   ```
 
-### 2. Installation
-Clone the repository and install Python dependencies:
+### 2. Install
 ```bash
 git clone https://github.com/your-username/Web-Scraper-Self-Healing.git
 cd Web-Scraper-Self-Healing
 pip install -r requirements.txt
 ```
 
-### 3. Environment Setup
-Copy `.env.example` to `.env` and fill in your details:
+### 3. Environment
 ```bash
 cp .env.example .env
 ```
-Edit `.env`:
 ```env
-BRIGHTDATA_COLLECTOR_ID=your_collector_id_here
+BRIGHTDATA_API_KEY=your_api_key_here
+BRIGHTDATA_ZONE=cli_unlocker
+BRIGHTDATA_COLLECTOR_ID=c_mt2z0drp1irsde3ydk
 TARGET_URL=https://duckdb.org/docs/
-GEMINI_API_KEY=your_gemini_api_key_here
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+OPENROUTER_MODEL=openai/gpt-4o-mini
+SCRAPE_ALLOW_FALLBACK=0
 ```
 
----
-
-## 🏃 Running the Pipeline
-
-### ⚡ 1-Click All-in-One Initiation (Recommended)
-Automate all setup, self-healing scraper runs, ChromaDB indexing, and start the chatbot web server with **a single command**:
-
+Create a collector (one-time) if you need a new one:
 ```bash
-python start.py
+bdata scraper create https://duckdb.org/docs/current/ "Extract url, title, and main documentation content" --name docs-rag-self-heal --pretty
 ```
-*(On Windows CMD / PowerShell, you can also run `.\run.bat` or `.\run.ps1`)*
 
-This script automatically:
-1. Verifies `.env` environment variables.
+### 4. Prove heal locally
+```bash
+python scripts/heal_loop.py --mock-unhealthy
+```
+UI polls `GET /api/heal-status` while the timeline advances: Scrape → Health → Heal → Index.
+
 2. Runs `scripts/heal_loop.py` to scrape, validate, self-heal, and embed vectors in ChromaDB.
 3. Launches the FastAPI Chatbot app on `http://localhost:8000`.
 4. Automatically opens the app in your default browser.
@@ -120,52 +138,31 @@ Open your browser to: **`http://localhost:8000`**
 
 ---
 
-## 🎭 How to Demo the Self-Heal Feature
+## Demo the self-heal feature
 
-For your hackathon presentation, you can demonstrate the automatic detection and self-healing loop in two ways:
+### Method A: UI (recommended for judges)
+1. Open `http://127.0.0.1:8000`.
+2. Confirm sidebar shows collector `c_mt2z0drp1irsde3ydk`.
+3. Click **Break & self-heal**.
+4. Watch the timeline: Scrape → Health (FAIL) → Heal → Index — driven by `GET /api/heal-status`.
+5. Ask a docs question; show citations.
 
-### Method A: Interactive UI Demo (1-Click)
-1. Open `http://localhost:8000` in your browser.
-2. Click the **"🩹 Break & Self-Heal"** button on the left panel.
-3. Watch the terminal console log:
-   - Scraper returns broken/empty data.
-   - `health_check.py` flags **DOM Selector Failure**.
-   - `heal_loop.py` invokes `bdata scraper heal <COLLECTOR_ID> "<reason>"`.
-   - Bright Data AI retrains selector model.
-   - `bdata scraper approve <COLLECTOR_ID>` approves new schema.
-   - Scraper re-runs, passes health check, and updates ChromaDB!
-
-### Method B: Terminal CLI Demo
-Run the orchestrator with the `--mock-unhealthy` flag:
+### Method B: Terminal
 ```bash
 python scripts/heal_loop.py --mock-unhealthy
 ```
+`--mock-unhealthy` only injects an empty first scrape. With a real collector + `bdata`, heal/approve/run are real.
 
-You will see:
-```text
---- 🔄 ATTEMPT 1 / 3 ---
-🚨 HEALTH CHECK FAILED: DOM selector failure: 1 of 1 pages (100%) have empty or missing content fields.
-
-🩹 TRIGGERING SELF-HEALING (Attempt 1)...
-  -> bdata scraper heal c_sample_collector_12345 "DOM selector failure: 1 of 1 pages (100%) have empty content fields."
-  -> bdata scraper approve c_sample_collector_12345
-  💡 Bright Data AI is re-learning DOM selectors & updating extraction schema...
-
---- 🔄 ATTEMPT 2 / 3 ---
-✨ HEALTH CHECK PASSED: Scrape healthy: 4 pages validated cleanly.
-✅ PIPELINE HEALTHY: Updating baseline dataset & triggering vector store indexing...
-```
+Proof transcript: [`docs/proof_self_heal_transcript.txt`](docs/proof_self_heal_transcript.txt)
 
 ---
 
-## ⚙️ Automated GitHub Actions Workflow
+## GitHub Actions
 
-The pipeline runs automatically on schedule via `.github/workflows/scrape-and-heal.yml`:
-- **Schedule**: Every 6 hours (`0 */6 * * *`)
-- **Manual Trigger**: Via GitHub Actions `workflow_dispatch` button
-- **Auto-Commit**: Automatically commits updated baseline JSON data when health checks pass.
+`.github/workflows/scrape-and-heal.yml` runs on a schedule (every 6 hours) and via `workflow_dispatch`.
 
 ---
 
-## 📄 License
+## License
 MIT License.
+

@@ -3,184 +3,174 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Self-Healing Docs RAG & Competitor Comparison | Bright Data</title>
+    <title>Self-Healing RAG — Bright Data Scraper Studio</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
-    <!-- Marked.js for Markdown parsing -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <!-- Chart.js for Radar Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- html2pdf.js for PDF exports -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body>
-    <div class="app-container">
-        <!-- Sidebar / Control Panel -->
-        <aside class="sidebar glass-panel">
-            <div class="brand">
-                <div class="logo-icon">⚡</div>
-                <div class="brand-text">
-                    <h1>Self-Healing RAG</h1>
-                    <span class="sub">Bright Data Scraper Studio</span>
-                </div>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div class="brand-block">
+                <p class="brand-kicker">Bright Data · Scraper Studio</p>
+                <h1 class="brand-name">Self-Healing RAG</h1>
+                <p class="brand-tag">Docs scrape → heal → index → answer</p>
             </div>
 
-            <div class="status-card glass-card">
-                <h3>Pipeline Health</h3>
-                <div class="status-indicator">
-                    <span class="status-dot green" id="status-dot"></span>
-                    <span id="status-text">Checking vector db...</span>
+            <section class="panel status-panel">
+                <h2 class="panel-title">Pipeline</h2>
+                <div class="status-row">
+                    <span class="status-dot" id="status-dot"></span>
+                    <span id="status-text">Checking index…</span>
                 </div>
-                <div class="stat-grid">
-                    <div class="stat-item">
-                        <span class="stat-label">Vector Chunks</span>
-                        <span class="stat-val" id="chunks-count">-</span>
+                <dl class="meta-grid">
+                    <div>
+                        <dt>Chunks</dt>
+                        <dd id="chunks-count">—</dd>
                     </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Baseline Pages</span>
-                        <span class="stat-val" id="pages-count">-</span>
+                    <div>
+                        <dt>Baseline</dt>
+                        <dd id="pages-count">—</dd>
                     </div>
-                </div>
-            </div>
+                    <div class="span-2">
+                        <dt>Collector</dt>
+                        <dd class="mono" id="collector-id">—</dd>
+                    </div>
+                    <div>
+                        <dt>Engine</dt>
+                        <dd class="mono" id="scrape-engine">—</dd>
+                    </div>
+                    <div>
+                        <dt>LLM</dt>
+                        <dd id="llm-badge">—</dd>
+                    </div>
+                </dl>
+                <p class="meta-line" id="last-heal-line">Last heal: —</p>
+                <a class="studio-link" id="studio-link" href="https://brightdata.com/cp/scrapers/" target="_blank" rel="noopener">Open collector in Studio</a>
+            </section>
 
-            <div class="demo-controls glass-card">
-                <h3>Self-Heal Demo Control</h3>
-                <p class="control-desc">Simulate a web DOM change breaking the scraper and watch Bright Data AI heal the collector!</p>
-                <div class="button-group">
-                    <button class="btn btn-secondary" id="btn-run-healthy">
-                        <span class="btn-icon">🔄</span> Run Scrape
-                    </button>
-                    <button class="btn btn-warning" id="btn-trigger-heal">
-                        <span class="btn-icon">🩹</span> Break & Self-Heal
-                    </button>
+            <section class="panel heal-panel">
+                <h2 class="panel-title">Self-heal</h2>
+                <p class="panel-copy">
+                    <strong>Demo break:</strong> inject empty extract to force health FAIL.<br>
+                    <strong>Real heal:</strong> <code>bdata scraper heal</code> on your collector, then re-run and index.
+                </p>
+                <ol class="heal-timeline" id="heal-timeline" aria-label="Heal pipeline phases">
+                    <li class="tl-step" data-phase="scrape"><span class="tl-mark"></span><span>Scrape</span></li>
+                    <li class="tl-step" data-phase="health"><span class="tl-mark"></span><span>Health</span></li>
+                    <li class="tl-step" data-phase="heal"><span class="tl-mark"></span><span>Heal</span></li>
+                    <li class="tl-step" data-phase="index"><span class="tl-mark"></span><span>Index</span></li>
+                </ol>
+                <div class="button-stack">
+                    <button type="button" class="btn btn-ghost" id="btn-run-healthy">Run Studio scrape</button>
+                    <button type="button" class="btn btn-accent" id="btn-trigger-heal">Break &amp; self-heal</button>
                 </div>
-                <div id="demo-log" class="demo-log-box hidden"></div>
-            </div>
+                <pre class="heal-log hidden" id="demo-log" aria-live="polite"></pre>
+            </section>
 
-            <div class="sidebar-footer">
-                <span>Powered by ChromaDB & Bright Data <code>bdata</code> CLI</span>
-            </div>
+            <footer class="sidebar-foot">
+                ChromaDB · <code>bdata</code> CLI · OpenRouter
+            </footer>
         </aside>
 
-        <!-- Main Content Area -->
-        <main class="chat-main glass-panel">
-            <!-- Navigation Tabs -->
-            <nav class="nav-tabs">
-                <button class="tab-btn active" id="tab-chat">
-                    <span>💬 RAG Q&A Chat</span>
-                </button>
-                <button class="tab-btn" id="tab-compare">
-                    <span>⚔️ Live URL Compare</span>
-                </button>
+        <main class="main-plane">
+            <nav class="nav-tabs" role="tablist">
+                <button type="button" class="tab-btn active" id="tab-chat" role="tab">RAG Q&amp;A</button>
+                <button type="button" class="tab-btn" id="tab-compare" role="tab">Live compare</button>
             </nav>
 
-            <!-- TAB 1: Chat View -->
-            <div class="tab-content" id="view-chat">
-                <header class="chat-header">
-                    <div class="header-info">
-                        <h2>Documentation AI Assistant</h2>
-                        <p>Ask specific questions about any target documentation URL.</p>
-                    </div>
-                    <div class="header-badges">
-                        <span class="badge" id="llm-badge">Local RAG Engine</span>
+            <div class="tab-content" id="view-chat" role="tabpanel">
+                <header class="view-header">
+                    <div>
+                        <h2>Ask the docs</h2>
+                        <p>Answers from indexed scrape with source citations.</p>
                     </div>
                 </header>
 
-                <!-- Live Target Doc URL Bar -->
-                <div class="chat-target-bar glass-card">
-                    <label for="chat-url-input">🌐 Target Documentation URL:</label>
-                    <input 
-                        type="url" 
-                        id="chat-url-input" 
-                        value="https://duckdb.org/docs/" 
-                        placeholder="e.g. https://docs.deno.com/ or https://docs.temporal.io/" 
-                        required 
+                <div class="url-bar">
+                    <label for="chat-url-input">Target docs URL</label>
+                    <input
+                        type="url"
+                        id="chat-url-input"
+                        value="https://expressjs.com/en/guide/using-middleware.html"
+                        placeholder="https://duckdb.org/docs/"
+                        required
                     />
                 </div>
 
                 <div class="chat-messages" id="chat-messages">
                     <div class="message assistant-message">
-                        <div class="avatar">🤖</div>
+                        <div class="avatar av-bot" aria-hidden="true">SV</div>
                         <div class="message-content">
-                            <p>Hello! I am your self-healing documentation AI assistant. Enter any target documentation URL above, and ask specific questions about it!</p>
+                            <p>Set a documentation URL, then ask a concrete question. If that site is already indexed, answers come from Chroma immediately—no multi-minute scrape.</p>
                         </div>
                     </div>
                 </div>
 
-                <div class="chat-input-area">
-                    <form id="chat-form" class="chat-form">
-                        <input 
-                            type="text" 
-                            id="user-input" 
-                            placeholder="Ask a question about the target documentation URL above..." 
-                            autocomplete="off"
-                            required
-                        />
-                        <button type="submit" class="btn btn-primary" id="send-btn">
-                            <span>Send</span>
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
-                        </button>
-                    </form>
-                </div>
+                <form id="chat-form" class="chat-form">
+                    <input
+                        type="text"
+                        id="user-input"
+                        placeholder="Ask about the target documentation…"
+                        autocomplete="off"
+                        required
+                    />
+                    <button type="submit" class="btn btn-primary" id="send-btn">Send</button>
+                </form>
             </div>
 
-            <!-- TAB 2: Compare View -->
-            <div class="tab-content hidden" id="view-compare">
-                <header class="chat-header">
-                    <div class="header-info">
-                        <h2>Live Dual-URL Scrape & Compare</h2>
-                        <p>Enter two documentation URLs to auto-scrape, validate health, and compare side-by-side.</p>
+            <div class="tab-content hidden" id="view-compare" role="tabpanel">
+                <header class="view-header">
+                    <div>
+                        <h2>Live dual-URL compare</h2>
+                        <p>Scrape both sides, index, then synthesize a side-by-side report.</p>
                     </div>
                 </header>
 
                 <div class="compare-container">
-                    <form id="compare-form" class="compare-form glass-card">
+                    <form id="compare-form" class="compare-form panel">
                         <div class="url-input-grid">
                             <div class="form-group">
-                                <label for="url-a">🌐 Competitor A Doc URL:</label>
+                                <label for="url-a">Docs A</label>
                                 <input type="url" id="url-a" value="https://duckdb.org/docs/" required />
                             </div>
                             <div class="form-group">
-                                <label for="url-b">🌐 Competitor B Doc URL:</label>
+                                <label for="url-b">Docs B</label>
                                 <input type="url" id="url-b" value="https://clickhouse.com/docs/" required />
                             </div>
                         </div>
                         <div class="form-group">
-                            <label for="topic">🎯 Comparison Topic / Prompt:</label>
+                            <label for="topic">Topic</label>
                             <input type="text" id="topic" value="Window functions, query performance, and architecture" required />
                         </div>
                         <button type="submit" class="btn btn-primary btn-block" id="btn-scrape-compare">
-                            <span>🚀 Scrape, Health-Check & Compare Documentation</span>
+                            Scrape, check &amp; compare
                         </button>
+                        <p class="form-error hidden" id="compare-error"></p>
                     </form>
 
-                    <!-- Progress Indicator -->
-                    <div id="compare-progress" class="compare-progress glass-card hidden">
-                        <div class="progress-step" id="step-1">1️⃣ Bright Data Scraper Studio: Running Cloud Collectors...</div>
-                        <div class="progress-step" id="step-2">2️⃣ Health Check Engine: Validating Scrape Data & Self-Heal...</div>
-                        <div class="progress-step" id="step-3">3️⃣ ChromaDB: Indexing Competitor Embeddings...</div>
-                        <div class="progress-step" id="step-4">4️⃣ Dual RAG Engine: Synthesizing Comparative Analysis...</div>
+                    <div id="compare-progress" class="compare-progress panel hidden">
+                        <div class="progress-step" id="step-1">1 · Studio scrape</div>
+                        <div class="progress-step" id="step-2">2 · Health check</div>
+                        <div class="progress-step" id="step-3">3 · Index embeddings</div>
+                        <div class="progress-step" id="step-4">4 · Comparative synthesis</div>
                     </div>
 
-                    <!-- Comparison Result Area -->
-                    <div id="compare-result" class="compare-result glass-card hidden">
+                    <div id="compare-result" class="compare-result panel hidden">
                         <div class="result-header">
-                            <h3>⚔️ Comparative Analysis Matrix</h3>
+                            <h3>Comparative analysis</h3>
                             <div class="export-actions">
-                                <button class="btn btn-secondary btn-sm" id="btn-export-md">
-                                    <span>📄 Export Markdown</span>
-                                </button>
-                                <button class="btn btn-secondary btn-sm" id="btn-export-pdf">
-                                    <span>📥 Export PDF Report</span>
-                                </button>
+                                <button type="button" class="btn btn-ghost btn-sm" id="btn-export-md">Export Markdown</button>
+                                <button type="button" class="btn btn-ghost btn-sm" id="btn-export-pdf">Export PDF</button>
                             </div>
                         </div>
 
-                        <!-- Interactive Radar Chart -->
-                        <div class="chart-wrapper glass-card">
-                            <h4 class="chart-title">📊 Architectural Metrics Evaluation</h4>
+                        <div class="chart-wrapper">
+                            <h4 class="chart-title">Doc coverage signals from live scrape</h4>
                             <div class="canvas-box">
                                 <canvas id="comparison-chart"></canvas>
                             </div>

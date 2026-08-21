@@ -23,9 +23,9 @@ from dotenv import load_dotenv
 import chromadb
 from chromadb.utils import embedding_functions
 
-load_dotenv()
-
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
+
 DATA_DIR = BASE_DIR / "data"
 CHROMA_DB_DIR = DATA_DIR / "chroma_db"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -33,13 +33,58 @@ COLLECTION_NAME = "docs_rag"
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini").strip() or "openai/gpt-4o-mini"
+BRIGHTDATA_COLLECTOR_ID = os.getenv("BRIGHTDATA_COLLECTOR_ID", "c_sample_collector_12345")
+LAST_HEAL_AT_PATH = DATA_DIR / "last_heal_at.txt"
 
 sys.path.append(str(BASE_DIR / "scripts"))
-from run_scraper import run_bdata_scraper, normalize_url
+from run_scraper import run_bdata_scraper, normalize_url, LAST_SCRAPE_ENGINE
 from chunk_and_embed import chunk_and_embed, extract_competitor_tag
 from health_check import check_health
 
-app = FastAPI(title="Docs-to-RAG Self-Healing Chatbot & Competitor Engine", version="2.3.0")
+
+def _llm_provider_name() -> str:
+    if OPENROUTER_API_KEY and OPENROUTER_API_KEY != "your_openrouter_api_key_here":
+        return "OpenRouter"
+    if GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":
+        return "Gemini API"
+    if OPENAI_API_KEY and OPENAI_API_KEY != "your_openai_api_key_here":
+        return "OpenAI API"
+    return "Local RAG Engine"
+
+
+def _call_openrouter(prompt: str) -> Optional[str]:
+    if not OPENROUTER_API_KEY or OPENROUTER_API_KEY == "your_openrouter_api_key_here":
+        return None
+    try:
+        import requests
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:8000",
+            "X-Title": "Self-Healing Docs RAG",
+        }
+        payload = {
+            "model": OPENROUTER_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+        }
+        res = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=45,
+        )
+        if res.status_code == 200:
+            return res.json()["choices"][0]["message"]["content"].strip()
+        print(f"[CHATBOT] OpenRouter HTTP {res.status_code}: {res.text[:300]}")
+    except Exception as e:
+        print(f"[CHATBOT] OpenRouter API call error: {e}")
+    return None
+
+
+app = FastAPI(title="Docs-to-RAG Self-Healing Chatbot & Competitor Engine", version="2.4.0")
 
 
 class ChatRequest(BaseModel):
@@ -84,10 +129,63 @@ def truncate_word_boundary(text: str, max_chars: int = 550) -> str:
     return trimmed + "..."
 
 
+def _chunk_relevance_score(query: str, text: str) -> float:
+    """Prefer chunks that match the query AND contain real explanatory content/code."""
+    q_terms = [t for t in query.lower().split() if len(t) > 2]
+    lower = text.lower()
+    overlap = sum(1 for t in q_terms if t in lower)
+    substance = min(len(text), 1200) / 1200.0
+    has_code = 1.5 if "```" in text or "require(" in text or "import " in text else 0.0
+    heading_penalty = -2.0 if len(text) < 100 else 0.0
+    return overlap * 2.0 + substance + has_code + heading_penalty
+
+
+def synthesize_local_answer(query: str, chunks: List[Dict[str, Any]]) -> str:
+    """
+    Local (no-LLM) answer builder: ranks retrieved chunks by query relevance + substance,
+    then writes a direct answer with the best prose/code — not just titles and links.
+    """
+    ranked = sorted(chunks, key=lambda c: _chunk_relevance_score(query, c.get("text", "")), reverse=True)
+
+    # Keep the most useful passages (allow multiple from the same page)
+    selected = []
+    seen_text = set()
+    for c in ranked:
+        text = (c.get("text") or "").strip()
+        if len(text) < 60:
+            continue
+        key = text[:120]
+        if key in seen_text:
+            continue
+        seen_text.add(key)
+        selected.append(c)
+        if len(selected) >= 3:
+            break
+
+    if not selected:
+        # Fall back to whatever we retrieved, even if short
+        selected = chunks[:2]
+
+    best = selected[0]
+    answer_parts = [
+        f"### Answer (from **{best['title']}**)\n",
+        f"Based on the documentation for your question: *{query}*\n",
+    ]
+
+    for i, c in enumerate(selected, 1):
+        body = truncate_word_boundary(c["text"], max_chars=900)
+        answer_parts.append(f"**[{i}] {c['title']}**\n\n{body}\n")
+
+    answer_parts.append(
+        f"Source page: [{best['url']}]({best['url']})"
+    )
+    return "\n".join(answer_parts)
+
+
 def generate_llm_answer(query: str, chunks: List[Dict[str, Any]]) -> str:
     """
     Clean RAG Answer Synthesizer with Word Boundary Truncation.
-    Generates structured, beautifully formatted Markdown grounded strictly in retrieved live web text.
+    Generates structured Markdown grounded strictly in retrieved live web text.
     """
     formatted_context = ""
     for idx, chunk in enumerate(chunks, 1):
@@ -96,11 +194,17 @@ def generate_llm_answer(query: str, chunks: List[Dict[str, Any]]) -> str:
     system_prompt = (
         "You are an expert technical assistant powered by a Self-Healing Documentation RAG pipeline. "
         "Answer the user's question accurately and concisely using ONLY the provided source documentation context below. "
+        "Do NOT reply with only a page title or link — always include the concrete explanation and code examples from the docs. "
         "Include reference numbers like [1], [2] in your answer when referencing specific documentation context.\n\n"
         f"Documentation Context:\n{formatted_context}\n\n"
         f"User Question: {query}\n\n"
         "Answer:"
     )
+
+    # Primary: OpenRouter
+    openrouter_answer = _call_openrouter(system_prompt)
+    if openrouter_answer:
+        return openrouter_answer
 
     if GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
@@ -129,51 +233,59 @@ def generate_llm_answer(query: str, chunks: List[Dict[str, Any]]) -> str:
     if not chunks:
         return "I couldn't find any relevant documentation context in the vector database to answer your question."
 
-    # Format clean local RAG synthesis with Word Boundary Truncation
-    first_chunk = chunks[0]
-    synthesized = f"### 📄 Documentation Summary: **{first_chunk['title']}**\n\n"
-    
-    seen_titles = set()
-    for i, c in enumerate(chunks, 1):
-        t = c['title']
-        if t in seen_titles:
-            continue
-        seen_titles.add(t)
-
-        clean_text = truncate_word_boundary(c['text'], max_chars=550)
-        synthesized += f"#### [{i}] {t}\n{clean_text}\n\n"
-
-    synthesized += f"For full details, view original web page: [{first_chunk['url']}]({first_chunk['url']})"
-    return synthesized
+    return synthesize_local_answer(query, chunks)
 
 
-def compute_comparative_scores(comp_a: str, comp_b: str) -> tuple:
-    """Computes relative 0-100 scores across 5 axes for Chart.js radar visualization."""
-    ca, cb = comp_a.lower(), comp_b.lower()
-    
-    if "duckdb" in ca:
-        scores_a = [95, 95, 45, 88, 90]
-    elif "express" in ca or "expressjs" in ca:
-        scores_a = [90, 96, 65, 88, 95]
-    elif "mongoose" in ca:
-        scores_a = [88, 95, 60, 90, 92]
-    elif "mongodb" in ca:
-        scores_a = [88, 92, 85, 92, 95]
-    elif "supabase" in ca:
-        scores_a = [86, 95, 90, 92, 92]
-    else:
-        scores_a = [85, 80, 80, 85, 85]
+def compute_doc_coverage_scores(chunks: List[Dict]) -> List[int]:
+    """
+    Derive 0-100 radar scores from retrieved scrape chunks (not brand names).
+    Axes: code examples, structure depth, content volume, API/reference signal, source diversity.
+    """
+    texts = [str(c.get("text") or "") for c in (chunks or [])]
+    urls = [str(c.get("url") or "") for c in (chunks or [])]
+    joined = "\n".join(texts)
+    total_chars = max(len(joined), 1)
 
-    if "clickhouse" in cb:
-        scores_b = [92, 55, 98, 92, 88]
-    elif "drizzle" in cb:
-        scores_b = [94, 90, 60, 86, 85]
-    elif "temporal" in cb:
-        scores_b = [85, 65, 96, 92, 88]
-    else:
-        scores_b = [85, 82, 82, 85, 85]
+    code_fences = joined.count("```") + joined.count("    ")
+    code_score = min(100, int(15 + code_fences * 4 + (joined.count(";") + joined.count("()")) * 0.15))
 
-    return scores_a, scores_b
+    heading_hits = sum(
+        1
+        for line in joined.splitlines()
+        if line.strip().startswith("#")
+        or line.strip().endswith(":")
+        or (len(line) < 80 and line.isupper() and len(line) > 3)
+    )
+    structure_score = min(100, int(20 + heading_hits * 6 + len(texts) * 4))
+
+    volume_score = min(100, int(10 + (total_chars / 80)))
+
+    api_tokens = (
+        "api", "endpoint", "function", "class", "method", "parameter",
+        "install", "import", "export", "schema", "query", "request", "response",
+    )
+    lower = joined.lower()
+    api_hits = sum(lower.count(t) for t in api_tokens)
+    api_score = min(100, int(18 + api_hits * 1.5))
+
+    unique_urls = len({u for u in urls if u})
+    diversity_score = min(100, int(25 + unique_urls * 18 + len(texts) * 3))
+
+    return [
+        max(5, min(100, code_score)),
+        max(5, min(100, structure_score)),
+        max(5, min(100, volume_score)),
+        max(5, min(100, api_score)),
+        max(5, min(100, diversity_score)),
+    ]
+
+
+def compute_comparative_scores(
+    chunks_a: List[Dict],
+    chunks_b: List[Dict],
+) -> tuple:
+    """Compute relative doc-coverage scores from live scrape chunks."""
+    return compute_doc_coverage_scores(chunks_a), compute_doc_coverage_scores(chunks_b)
 
 
 def generate_comparative_answer(topic: str, comp_a: str, chunks_a: List[Dict], comp_b: str, chunks_b: List[Dict]) -> str:
@@ -190,6 +302,10 @@ def generate_comparative_answer(topic: str, comp_a: str, chunks_a: List[Dict], c
         "2. Side-by-Side Comparison Matrix Table (| Feature | " + comp_a + " | " + comp_b + " |)\n"
         "3. Key Trade-offs & Recommendations\n"
     )
+
+    openrouter_answer = _call_openrouter(prompt)
+    if openrouter_answer:
+        return openrouter_answer
 
     if GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
@@ -224,10 +340,12 @@ def generate_comparative_answer(topic: str, comp_a: str, chunks_a: List[Dict], c
 
 @app.get("/api/status")
 def get_status():
-    """Returns database status and indexed document count."""
+    """Returns database status, scrape engine, collector id, and LLM provider."""
+    import run_scraper as run_scraper_mod
+
     collection = get_chroma_collection()
     count = collection.count() if collection else 0
-    
+
     baseline_path = DATA_DIR / "last_known_good.json"
     baseline_count = 0
     if baseline_path.exists():
@@ -238,48 +356,82 @@ def get_status():
         except Exception:
             pass
 
+    last_heal_at = None
+    if LAST_HEAL_AT_PATH.exists():
+        try:
+            last_heal_at = LAST_HEAL_AT_PATH.read_text(encoding="utf-8").strip() or None
+        except Exception:
+            last_heal_at = None
+
+    engine = getattr(run_scraper_mod, "LAST_SCRAPE_ENGINE", "none")
+    proof_path = DATA_DIR / "proof_bdata_run.json"
+    if engine in (None, "none") and proof_path.exists():
+        try:
+            engine = json.loads(proof_path.read_text(encoding="utf-8")).get("engine", engine)
+        except Exception:
+            pass
+
     return {
         "status": "online",
         "indexed_chunks": count,
         "baseline_pages": baseline_count,
-        "llm_provider": "Gemini API" if GEMINI_API_KEY else ("OpenAI API" if OPENAI_API_KEY else "Local RAG Engine")
+        "llm_provider": _llm_provider_name(),
+        "collector_id": BRIGHTDATA_COLLECTOR_ID,
+        "scrape_engine": engine,
+        "last_heal_at": last_heal_at,
+        "openrouter_model": OPENROUTER_MODEL if _llm_provider_name() == "OpenRouter" else None,
     }
 
 
 @app.post("/api/chat")
 def chat(request: ChatRequest):
     """
-    True Live URL-Targeted RAG Q&A Chat Endpoint.
-    1. Normalizes input URL scheme
-    2. Triggers REAL network web scraping of target URL
-    3. Embeds actual DOM content into ChromaDB
-    4. Performs semantic retrieval
-    5. Generates clean answer grounded in live web text with word boundary truncation
+    RAG Q&A: answer from indexed Chroma first (fast).
+    Only scrape+embed when that competitor has no chunks yet.
     """
     target_url = normalize_url(request.url or "https://duckdb.org/docs/")
     comp_tag = extract_competitor_tag(target_url)
 
-    collector_id = os.getenv("BRIGHTDATA_COLLECTOR_ID", "c_sample_collector_12345")
+    collector_id = BRIGHTDATA_COLLECTOR_ID
     file_path = DATA_DIR / f"scrape_{comp_tag.lower()}.json"
-
-    # Execute REAL live network HTTP web scraping (mock=False)
-    run_bdata_scraper(collector_id=collector_id, target_url=target_url, output_path=file_path, mock=False)
-    chunk_and_embed(input_path=file_path, competitor_tag=comp_tag)
-
     collection = get_chroma_collection()
 
+    def _has_competitor_chunks() -> bool:
+        if not collection or collection.count() == 0:
+            return False
+        try:
+            sample = collection.get(where={"competitor": comp_tag}, limit=1)
+            return bool(sample and sample.get("ids"))
+        except Exception:
+            return False
+
+    # Avoid multi-minute Studio scrape on every chat turn (causes browser "Failed to fetch")
+    if not _has_competitor_chunks():
+        try:
+            run_bdata_scraper(
+                collector_id=collector_id,
+                target_url=target_url,
+                output_path=file_path,
+                mock=False,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Scrape failed (Studio-first): {e}")
+        chunk_and_embed(input_path=file_path, competitor_tag=comp_tag)
+        collection = get_chroma_collection()
+
     try:
+        n = min(request.top_k or 4, max(collection.count(), 1)) if collection else 4
         results = collection.query(
             query_texts=[request.query],
             where={"competitor": comp_tag},
-            n_results=min(request.top_k, collection.count())
+            n_results=n,
         ) if collection else {}
 
         if not results or not results.get("documents") or not results["documents"][0]:
             results = collection.query(
                 query_texts=[request.query],
-                n_results=min(request.top_k, collection.count())
-            )
+                n_results=n,
+            ) if collection else {}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"ChromaDB query failed: {str(e)}")
 
@@ -329,18 +481,18 @@ def scrape_and_compare(req: CompareRequest):
     comp_a = extract_competitor_tag(url_a)
     comp_b = extract_competitor_tag(url_b)
 
-    collector_id = os.getenv("BRIGHTDATA_COLLECTOR_ID", "c_sample_collector_12345")
-    
+    collector_id = BRIGHTDATA_COLLECTOR_ID
+
     file_a = DATA_DIR / f"scrape_{comp_a.lower()}.json"
     file_b = DATA_DIR / f"scrape_{comp_b.lower()}.json"
 
-    # Step 1: Real Live Web Scrape URL A
-    run_bdata_scraper(collector_id=collector_id, target_url=url_a, output_path=file_a, mock=False)
-    chunk_and_embed(input_path=file_a, competitor_tag=comp_a)
-
-    # Step 2: Real Live Web Scrape URL B
-    run_bdata_scraper(collector_id=collector_id, target_url=url_b, output_path=file_b, mock=False)
-    chunk_and_embed(input_path=file_b, competitor_tag=comp_b)
+    try:
+        run_bdata_scraper(collector_id=collector_id, target_url=url_a, output_path=file_a, mock=False)
+        chunk_and_embed(input_path=file_a, competitor_tag=comp_a)
+        run_bdata_scraper(collector_id=collector_id, target_url=url_b, output_path=file_b, mock=False)
+        chunk_and_embed(input_path=file_b, competitor_tag=comp_b)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Compare scrape failed (Studio-first): {e}")
 
     # Step 3: Perform Dual Filtered Chroma Queries
     collection = get_chroma_collection()
@@ -360,7 +512,7 @@ def scrape_and_compare(req: CompareRequest):
 
     comparison_md = generate_comparative_answer(req.topic, comp_a, chunks_a, comp_b, chunks_b)
 
-    scores_a, scores_b = compute_comparative_scores(comp_a, comp_b)
+    scores_a, scores_b = compute_comparative_scores(chunks_a, chunks_b)
 
     citations = []
     for c in chunks_a + chunks_b:
@@ -378,6 +530,33 @@ def scrape_and_compare(req: CompareRequest):
     }
 
 
+@app.get("/api/heal-status")
+def heal_status():
+    """Return live heal pipeline phase written by heal_loop.py."""
+    status_path = DATA_DIR / "heal_job_status.json"
+    payload = {
+        "phase": "idle",
+        "collector_id": BRIGHTDATA_COLLECTOR_ID,
+        "attempt": None,
+        "health_reason": "",
+        "engine": "",
+        "message": "No heal job has run yet",
+        "updated_at": None,
+        "last_heal_at": None,
+    }
+    if status_path.exists():
+        try:
+            payload.update(json.loads(status_path.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    if LAST_HEAL_AT_PATH.exists():
+        try:
+            payload["last_heal_at"] = LAST_HEAL_AT_PATH.read_text(encoding="utf-8").strip() or None
+        except Exception:
+            pass
+    return payload
+
+
 @app.post("/api/trigger-scrape")
 def trigger_scrape(req: TriggerScrapeRequest, background_tasks: BackgroundTasks):
     """Triggers self-healing scraper pipeline background worker."""
@@ -386,6 +565,22 @@ def trigger_scrape(req: TriggerScrapeRequest, background_tasks: BackgroundTasks)
     if req.mock_unhealthy:
         cmd.append("--mock-unhealthy")
 
+    # Seed status so UI polling starts immediately
+    try:
+        from datetime import datetime, timezone
+        seed = {
+            "phase": "scrape",
+            "collector_id": BRIGHTDATA_COLLECTOR_ID,
+            "attempt": 1,
+            "health_reason": "",
+            "engine": "",
+            "message": "Pipeline triggered from UI",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        (DATA_DIR / "heal_job_status.json").write_text(json.dumps(seed, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
     def run_pipeline():
         subprocess.run(cmd)
 
@@ -393,7 +588,8 @@ def trigger_scrape(req: TriggerScrapeRequest, background_tasks: BackgroundTasks)
 
     return {
         "message": "Self-healing pipeline trigger initiated!",
-        "mock_unhealthy": req.mock_unhealthy
+        "mock_unhealthy": req.mock_unhealthy,
+        "collector_id": BRIGHTDATA_COLLECTOR_ID,
     }
 
 

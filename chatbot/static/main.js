@@ -3,8 +3,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let chartInstance = null;
     let currentComparisonData = null;
+    let healPollTimer = null;
 
-    // Elements
+    const PHASE_MAP = {
+        idle: [],
+        scrape: ["scrape"],
+        health_fail: ["scrape", "health"],
+        healing: ["scrape", "health", "heal"],
+        retry: ["scrape", "health", "heal"],
+        healthy: ["scrape", "health", "heal"],
+        indexing: ["scrape", "health", "heal", "index"],
+        done: ["scrape", "health", "heal", "index"],
+        error: ["scrape"],
+    };
+
     const tabChat = document.getElementById("tab-chat");
     const tabCompare = document.getElementById("tab-compare");
     const viewChat = document.getElementById("view-chat");
@@ -24,15 +36,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const compareResult = document.getElementById("compare-result");
     const resultMarkdown = document.getElementById("result-markdown");
     const compareCitations = document.getElementById("compare-citations");
+    const compareError = document.getElementById("compare-error");
 
     const btnExportPdf = document.getElementById("btn-export-pdf");
     const btnExportMd = document.getElementById("btn-export-md");
-
     const btnRunHealthy = document.getElementById("btn-run-healthy");
     const btnTriggerHeal = document.getElementById("btn-trigger-heal");
     const demoLogBox = document.getElementById("demo-log");
 
-    // Tab Switching Logic
     tabChat.addEventListener("click", () => {
         tabChat.classList.add("active");
         tabCompare.classList.remove("active");
@@ -47,41 +58,103 @@ document.addEventListener("DOMContentLoaded", () => {
         viewChat.classList.add("hidden");
     });
 
-    // Update input placeholder on target URL change
     chatUrlInput.addEventListener("input", () => {
         const val = chatUrlInput.value.trim();
-        if (val) {
-            userInput.placeholder = `Ask a question about ${val}...`;
-        }
+        if (val) userInput.placeholder = `Ask a question about ${val}…`;
     });
 
-    // Fetch Pipeline Status
     async function fetchStatus() {
         try {
             const res = await fetch("/api/status");
-            if (res.ok) {
-                const data = await res.json();
-                document.getElementById("chunks-count").textContent = data.indexed_chunks;
-                document.getElementById("pages-count").textContent = data.baseline_pages;
-                document.getElementById("llm-badge").textContent = data.llm_provider;
+            if (!res.ok) return;
+            const data = await res.json();
+            document.getElementById("chunks-count").textContent = data.indexed_chunks;
+            document.getElementById("pages-count").textContent = data.baseline_pages;
+            document.getElementById("llm-badge").textContent = data.llm_provider || "—";
+            const collectorEl = document.getElementById("collector-id");
+            if (collectorEl) collectorEl.textContent = data.collector_id || "—";
+            const engineEl = document.getElementById("scrape-engine");
+            if (engineEl) engineEl.textContent = data.scrape_engine || "—";
+            const healLine = document.getElementById("last-heal-line");
+            if (healLine) {
+                healLine.textContent = data.last_heal_at
+                    ? `Last heal: ${data.last_heal_at}`
+                    : "Last heal: —";
+            }
+            const studioLink = document.getElementById("studio-link");
+            if (studioLink && data.collector_id) {
+                studioLink.href = `https://brightdata.com/cp/scrapers/${data.collector_id}`;
+            }
 
-                const statusDot = document.getElementById("status-dot");
-                const statusText = document.getElementById("status-text");
-
-                if (data.indexed_chunks > 0) {
-                    statusDot.className = "status-dot green";
-                    statusText.textContent = `Indexed & Ready (${data.indexed_chunks} chunks)`;
-                } else {
-                    statusDot.className = "status-dot yellow";
-                    statusText.textContent = "Vector DB Empty — Run Scrape";
-                }
+            const statusDot = document.getElementById("status-dot");
+            const statusText = document.getElementById("status-text");
+            if (data.indexed_chunks > 0) {
+                statusDot.className = "status-dot green";
+                statusText.textContent = `Indexed · ${data.indexed_chunks} chunks`;
+            } else {
+                statusDot.className = "status-dot yellow";
+                statusText.textContent = "Index empty — run scrape";
             }
         } catch (err) {
             console.error("Failed to fetch status", err);
         }
     }
 
-    // Chat submit handler with Target URL
+    function setTimelineFromPhase(phase, healthFailed) {
+        const doneThrough = PHASE_MAP[phase] || [];
+        document.querySelectorAll(".tl-step").forEach((el) => {
+            const key = el.dataset.phase;
+            el.classList.remove("active", "done", "fail");
+            if (doneThrough.includes(key)) {
+                if (key === "health" && (phase === "health_fail" || healthFailed)) {
+                    el.classList.add("fail");
+                } else if (doneThrough[doneThrough.length - 1] === key && phase !== "done") {
+                    el.classList.add("active");
+                } else {
+                    el.classList.add("done");
+                }
+            }
+            if (phase === "done") el.classList.add("done");
+            if (phase === "error" && key === "scrape") el.classList.add("fail");
+        });
+    }
+
+    async function pollHealStatus() {
+        try {
+            const res = await fetch("/api/heal-status");
+            if (!res.ok) return null;
+            return await res.json();
+        } catch {
+            return null;
+        }
+    }
+
+    function startHealPolling() {
+        if (healPollTimer) clearInterval(healPollTimer);
+        healPollTimer = setInterval(async () => {
+            const st = await pollHealStatus();
+            if (!st) return;
+            const phase = st.phase || "idle";
+            setTimelineFromPhase(phase, phase === "health_fail");
+            demoLogBox.classList.remove("hidden");
+            const lines = [
+                `phase: ${phase}`,
+                st.collector_id ? `collector: ${st.collector_id}` : null,
+                st.attempt != null ? `attempt: ${st.attempt}` : null,
+                st.engine ? `engine: ${st.engine}` : null,
+                st.health_reason ? `health: ${st.health_reason.slice(0, 180)}` : null,
+                st.message || null,
+                st.updated_at ? `updated: ${st.updated_at}` : null,
+            ].filter(Boolean);
+            demoLogBox.textContent = lines.join("\n");
+            await fetchStatus();
+            if (phase === "done" || phase === "error") {
+                clearInterval(healPollTimer);
+                healPollTimer = null;
+            }
+        }, 2000);
+    }
+
     chatForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         const query = userInput.value.trim();
@@ -91,42 +164,38 @@ document.addEventListener("DOMContentLoaded", () => {
         appendMessage("user", query);
         userInput.value = "";
         sendBtn.disabled = true;
-
         const loadingId = appendLoadingMessage(targetUrl);
 
         try {
             const res = await fetch("/api/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: query, url: targetUrl })
+                body: JSON.stringify({ query, url: targetUrl }),
             });
-
             removeMessage(loadingId);
-
             if (res.ok) {
                 const data = await res.json();
                 appendMessage("assistant", data.answer, data.citations);
             } else {
-                const errData = await res.json();
-                appendMessage("assistant", `⚠️ Error: ${errData.detail || "Failed to process chat query"}`);
+                const errData = await res.json().catch(() => ({}));
+                appendMessage("assistant", `Error: ${errData.detail || "Failed to process chat query"}`);
             }
         } catch (err) {
             removeMessage(loadingId);
-            appendMessage("assistant", `⚠️ Network error: ${err.message}`);
+            appendMessage("assistant", `Network error: ${err.message}`);
         } finally {
             sendBtn.disabled = false;
             fetchStatus();
         }
     });
 
-    // Render Clean Assistant Messages using Marked.js
     function appendMessage(role, text, citations = []) {
         const msgDiv = document.createElement("div");
         msgDiv.className = `message ${role}-message`;
 
         const avatarDiv = document.createElement("div");
-        avatarDiv.className = "avatar";
-        avatarDiv.textContent = role === "user" ? "👤" : "🤖";
+        avatarDiv.className = `avatar ${role === "user" ? "av-user" : "av-bot"}`;
+        avatarDiv.textContent = role === "user" ? "You" : "SV";
 
         const contentDiv = document.createElement("div");
         contentDiv.className = role === "assistant" ? "message-content markdown-body" : "message-content";
@@ -142,31 +211,27 @@ document.addEventListener("DOMContentLoaded", () => {
         if (citations && citations.length > 0) {
             const citationsBox = document.createElement("div");
             citationsBox.className = "citations-box";
-
             const title = document.createElement("div");
             title.className = "citations-title";
-            title.textContent = "Source Citations";
+            title.textContent = "Source citations";
             citationsBox.appendChild(title);
-
             const list = document.createElement("div");
             list.className = "citations-list";
-
-            citations.forEach(cit => {
+            citations.forEach((cit) => {
                 const a = document.createElement("a");
                 a.className = "citation-pill";
                 a.href = cit.url;
                 a.target = "_blank";
-                a.innerHTML = `📄 [${cit.id}] ${cit.title}`;
+                a.rel = "noopener";
+                a.textContent = `[${cit.id}] ${cit.title}`;
                 list.appendChild(a);
             });
-
             citationsBox.appendChild(list);
             contentDiv.appendChild(citationsBox);
         }
 
         msgDiv.appendChild(avatarDiv);
         msgDiv.appendChild(contentDiv);
-
         chatMessages.appendChild(msgDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
@@ -176,20 +241,16 @@ document.addEventListener("DOMContentLoaded", () => {
         const msgDiv = document.createElement("div");
         msgDiv.className = "message assistant-message";
         msgDiv.id = id;
-
         const avatarDiv = document.createElement("div");
-        avatarDiv.className = "avatar";
-        avatarDiv.textContent = "🤖";
-
+        avatarDiv.className = "avatar av-bot";
+        avatarDiv.textContent = "SV";
         const contentDiv = document.createElement("div");
         contentDiv.className = "message-content";
-        contentDiv.innerHTML = `<p>🌐 Live Web Scraping & Indexing <b>${targetUrl}</b>... (1.5 - 3s network crawl)</p>`;
-
+        contentDiv.innerHTML = `<p>Retrieving from index for <b>${targetUrl}</b>…</p>`;
         msgDiv.appendChild(avatarDiv);
         msgDiv.appendChild(contentDiv);
         chatMessages.appendChild(msgDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
-
         return id;
     }
 
@@ -198,112 +259,95 @@ document.addEventListener("DOMContentLoaded", () => {
         if (elem) elem.remove();
     }
 
-    // Render Radar Chart using Chart.js
     function renderComparisonChart(compA, compB, scoresA, scoresB) {
         const ctx = document.getElementById("comparison-chart").getContext("2d");
-        
-        if (chartInstance) {
-            chartInstance.destroy();
-        }
+        if (chartInstance) chartInstance.destroy();
 
         chartInstance = new Chart(ctx, {
             type: "radar",
             data: {
                 labels: [
-                    "Performance & Speed",
-                    "Ease of Local Setup",
-                    "Distributed Scaling",
-                    "Feature Completeness",
-                    "Ecosystem Support"
+                    "Code examples",
+                    "Structure depth",
+                    "Content volume",
+                    "API / reference signal",
+                    "Source diversity",
                 ],
                 datasets: [
                     {
                         label: compA,
-                        data: scoresA || [95, 95, 45, 88, 90],
+                        data: scoresA || [50, 50, 50, 50, 50],
                         fill: true,
-                        backgroundColor: "rgba(59, 130, 246, 0.25)",
-                        borderColor: "#3b82f6",
-                        pointBackgroundColor: "#3b82f6",
-                        pointBorderColor: "#fff",
-                        pointHoverBackgroundColor: "#fff",
-                        pointHoverBorderColor: "#3b82f6"
+                        backgroundColor: "rgba(26, 158, 143, 0.22)",
+                        borderColor: "#2dd4bf",
+                        pointBackgroundColor: "#2dd4bf",
                     },
                     {
                         label: compB,
-                        data: scoresB || [92, 55, 98, 92, 88],
+                        data: scoresB || [50, 50, 50, 50, 50],
                         fill: true,
-                        backgroundColor: "rgba(139, 92, 246, 0.25)",
-                        borderColor: "#8b5cf6",
-                        pointBackgroundColor: "#8b5cf6",
-                        pointBorderColor: "#fff",
-                        pointHoverBackgroundColor: "#fff",
-                        pointHoverBorderColor: "#8b5cf6"
-                    }
-                ]
+                        backgroundColor: "rgba(212, 196, 168, 0.2)",
+                        borderColor: "#d4c4a8",
+                        pointBackgroundColor: "#d4c4a8",
+                    },
+                ],
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
                     r: {
-                        angleLines: { color: "rgba(255, 255, 255, 0.15)" },
-                        grid: { color: "rgba(255, 255, 255, 0.1)" },
+                        angleLines: { color: "rgba(212, 196, 168, 0.15)" },
+                        grid: { color: "rgba(212, 196, 168, 0.12)" },
                         pointLabels: {
-                            color: "#94a3b8",
-                            font: { family: "Outfit", size: 11, weight: "500" }
+                            color: "#9aa49c",
+                            font: { family: "IBM Plex Sans", size: 11 },
                         },
-                        ticks: {
-                            display: false,
-                            min: 0,
-                            max: 100
-                        }
-                    }
+                        ticks: { display: false, min: 0, max: 100 },
+                    },
                 },
                 plugins: {
                     legend: {
                         labels: {
-                            color: "#f8fafc",
-                            font: { family: "Outfit", size: 12, weight: "600" }
-                        }
-                    }
-                }
-            }
+                            color: "#eceae4",
+                            font: { family: "IBM Plex Sans", size: 12 },
+                        },
+                    },
+                },
+            },
         });
     }
 
-    // Compare Form Handler
     compareForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         const urlA = urlAInput.value.trim();
         const urlB = urlBInput.value.trim();
         const topic = topicInput.value.trim();
-
         if (!urlA || !urlB || !topic) return;
 
+        compareError.classList.add("hidden");
+        compareError.textContent = "";
         compareProgress.classList.remove("hidden");
         compareResult.classList.add("hidden");
         resetProgressSteps();
-
         setStepStatus(1, "active");
-
-        setTimeout(() => setStepStatus(1, "done"), 800);
-        setTimeout(() => setStepStatus(2, "active"), 900);
-        setTimeout(() => setStepStatus(2, "done"), 1600);
-        setTimeout(() => setStepStatus(3, "active"), 1700);
 
         try {
             const res = await fetch("/api/scrape-and-compare", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ url_a: urlA, url_b: urlB, topic: topic })
+                body: JSON.stringify({ url_a: urlA, url_b: urlB, topic }),
             });
 
-            setStepStatus(3, "done");
-            setStepStatus(4, "active");
+            setStepStatus(1, "done");
+            setStepStatus(2, "done");
+            setStepStatus(3, "active");
 
             if (res.ok) {
                 const data = await res.json();
                 currentComparisonData = data;
+                setStepStatus(3, "done");
+                setStepStatus(4, "active");
                 setStepStatus(4, "done");
 
                 if (window.marked) {
@@ -312,19 +356,24 @@ document.addEventListener("DOMContentLoaded", () => {
                     resultMarkdown.innerText = data.comparison_markdown;
                 }
 
-                renderComparisonChart(data.competitor_a, data.competitor_b, data.scores_a, data.scores_b);
+                renderComparisonChart(
+                    data.competitor_a,
+                    data.competitor_b,
+                    data.scores_a,
+                    data.scores_b
+                );
 
                 if (data.citations && data.citations.length > 0) {
                     compareCitations.innerHTML = `
-                        <div class="citations-title">Verified Source Documentation Citations</div>
+                        <div class="citations-title">Verified source citations</div>
                         <div class="citations-list">
-                            ${data.citations.map(c => `
-                                <a href="${c.url}" target="_blank" class="citation-pill">
-                                    📄 [${c.id}] ${c.title}
-                                </a>
-                            `).join("")}
-                        </div>
-                    `;
+                            ${data.citations
+                                .map(
+                                    (c) =>
+                                        `<a href="${c.url}" target="_blank" rel="noopener" class="citation-pill">[${c.id}] ${c.title}</a>`
+                                )
+                                .join("")}
+                        </div>`;
                 } else {
                     compareCitations.innerHTML = "";
                 }
@@ -332,11 +381,15 @@ document.addEventListener("DOMContentLoaded", () => {
                 compareResult.classList.remove("hidden");
                 fetchStatus();
             } else {
-                const errData = await res.json();
-                alert(`Error comparing documentation: ${errData.detail || "Failed"}`);
+                const errData = await res.json().catch(() => ({}));
+                compareError.textContent = errData.detail || "Compare failed";
+                compareError.classList.remove("hidden");
+                resetProgressSteps();
             }
         } catch (err) {
-            alert(`Network Error: ${err.message}`);
+            compareError.textContent = `Network error: ${err.message}`;
+            compareError.classList.remove("hidden");
+            resetProgressSteps();
         }
     });
 
@@ -352,18 +405,15 @@ document.addEventListener("DOMContentLoaded", () => {
         if (step) step.className = `progress-step ${status}`;
     }
 
-    // Export Markdown Report Handler
     btnExportMd.addEventListener("click", () => {
         if (!currentComparisonData) return;
-        
-        let mdContent = `# ⚡ Competitive Documentation Report: ${currentComparisonData.competitor_a} vs ${currentComparisonData.competitor_b}\n\n`;
+        let mdContent = `# Competitive documentation report: ${currentComparisonData.competitor_a} vs ${currentComparisonData.competitor_b}\n\n`;
         mdContent += `**Topic**: ${currentComparisonData.topic}\n\n`;
         mdContent += currentComparisonData.comparison_markdown + "\n\n";
-        mdContent += `## 📄 Source Documentation Citations\n`;
-        currentComparisonData.citations.forEach(c => {
+        mdContent += `## Source citations\n`;
+        (currentComparisonData.citations || []).forEach((c) => {
             mdContent += `- [${c.title}](${c.url})\n`;
         });
-
         const blob = new Blob([mdContent], { type: "text/markdown;charset=utf-8" });
         const link = document.createElement("a");
         link.href = URL.createObjectURL(blob);
@@ -371,41 +421,46 @@ document.addEventListener("DOMContentLoaded", () => {
         link.click();
     });
 
-    // Export PDF Report Handler
     btnExportPdf.addEventListener("click", () => {
         if (!currentComparisonData || !window.html2pdf) return;
-
         const opt = {
             margin: 0.5,
             filename: `Doc_Comparison_${currentComparisonData.competitor_a}_vs_${currentComparisonData.competitor_b}.pdf`,
             image: { type: "jpeg", quality: 0.98 },
-            html2canvas: { scale: 2, backgroundColor: "#0b0f19" },
-            jsPDF: { unit: "in", format: "letter", orientation: "portrait" }
+            html2canvas: { scale: 2, backgroundColor: "#0f1614" },
+            jsPDF: { unit: "in", format: "letter", orientation: "portrait" },
         };
-
         html2pdf().set(opt).from(compareResult).save();
     });
 
-    // Demo control handlers
     async function triggerScrape(mockUnhealthy = false) {
         demoLogBox.classList.remove("hidden");
-        demoLogBox.innerHTML = `⏳ Triggering pipeline (mock_unhealthy=${mockUnhealthy})...<br>`;
+        setTimelineFromPhase("scrape", false);
+        demoLogBox.textContent = mockUnhealthy
+            ? "Starting demo break: empty extract → health FAIL → real bdata heal…"
+            : "Starting healthy Studio scrape…";
 
         try {
             const res = await fetch("/api/trigger-scrape", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ mock_unhealthy: mockUnhealthy })
+                body: JSON.stringify({ mock_unhealthy: mockUnhealthy }),
             });
-
+            const body = await res.json().catch(() => ({}));
             if (res.ok) {
-                demoLogBox.innerHTML += `🚀 Background process started!<br>Check terminal console to see <code>bdata scraper heal</code> logs.`;
-                setTimeout(fetchStatus, 3000);
+                demoLogBox.textContent =
+                    `Pipeline started\ncollector: ${body.collector_id || "?"}\n` +
+                    (mockUnhealthy
+                        ? "mode: inject empty extract (demo) + real heal CLI"
+                        : "mode: healthy Studio run");
+                startHealPolling();
             } else {
-                demoLogBox.innerHTML += `❌ Failed to trigger pipeline.`;
+                demoLogBox.textContent = "Failed to trigger pipeline.";
+                setTimelineFromPhase("error", false);
             }
         } catch (err) {
-            demoLogBox.innerHTML += `❌ Error: ${err.message}`;
+            demoLogBox.textContent = `Error: ${err.message}`;
+            setTimelineFromPhase("error", false);
         }
     }
 

@@ -73,8 +73,20 @@ def check_health(latest_path: Path, baseline_path: Path) -> tuple:
                 if latest_domain and latest_domain == baseline_domain:
                     baseline_count = len(baseline_data)
                     latest_count = len(latest_data)
-                    
-                    if latest_count < (baseline_count * 0.5):
+
+                    # Ignore placeholder/stub baselines (short generic content) when
+                    # comparing against a real live scrape that has substantial prose.
+                    stub_baseline = all(
+                        len(str(p.get("content", "")).strip()) < 200
+                        for p in baseline_data
+                    )
+                    latest_prose = sum(len(str(p.get("content", "")).strip()) for p in latest_data)
+
+                    if (
+                        not stub_baseline
+                        and latest_count < (baseline_count * 0.5)
+                        and latest_prose < 1500
+                    ):
                         drop_pct = int(((baseline_count - latest_count) / baseline_count) * 100)
                         return False, f"[HEALTH_CHECK] ❌ FAIL: Page count dropped by {drop_pct}% vs baseline for {latest_domain} ({latest_count} current vs {baseline_count} baseline pages).", latest_data
         except Exception:

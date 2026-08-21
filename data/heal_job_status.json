@@ -1,0 +1,9 @@
+{
+  "phase": "error",
+  "collector_id": "c_mt2z0drp1irsde3ydk",
+  "attempt": 3,
+  "health_reason": "[HEALTH_CHECK] \u274c FAIL: Scraped content is empty or corrupt on 1 page(s): https://duckdb.org/docs/",
+  "engine": "",
+  "message": "Pipeline failed after max retries",
+  "updated_at": "2026-08-21T21:05:00.985723+00:00"
+}

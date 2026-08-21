@@ -1,0 +1,26 @@
+{
+  "engine": "bdata_cli",
+  "collector_id": "c_mt2z0drp1irsde3ydk",
+  "target_url": "https://duckdb.org/docs/current/clients/python/overview",
+  "page_count": 411,
+  "pages": [
+    {
+      "url": "https://duckdb.org/docs/current/core_extensions/iceberg/writing_to_iceberg.html",
+      "title": "Writing to Iceberg",
+      "content_preview": "The DuckDB iceberg extension supports writing to Iceberg tables when an Iceberg catalog is attached.\nWriting to a table read directly from storage with iceberg_scan is not supported: the catalog is required to commit the new table metadata.\n\n### Supported Operations\n\nThe iceberg extension supports the following operations when used with a REST Catalog attached:\nSince these operations are supported, the following will also work:\n```\nCOPY FROM DATABASE duckdb_db TO iceberg_datalake ; -- Or COPY FROM DATABASE iceberg_datalake TO duckdb_db ;\n```\nThis functionality enables deep copies between Iceberg and DuckDB storage.\n\n### Creating Tables\n\nTables are created with the standard CREATE TABLE syntax. Iceberg table properties can be supplied with the WITH clause:\n```\nCREATE TABLE test_create_table",
+      "content_chars": 5400
+    },
+    {
+      "url": "https://duckdb.org/docs/current/sql/query_syntax/where.html",
+      "title": "WHERE Clause",
+      "content_preview": "The WHERE clause specifies any filters to apply to the data. This allows you to select only a subset of the data in which you are interested. Logically the WHERE clause is applied immediately after the FROM clause.\n\n### Examples\n\nSelect all rows where the id is equal to 3:\n```\nSELECT * FROM tbl WHERE id = 3 ;\n```\nSelect all rows that match the given case-sensitive LIKE expression:\n```\nSELECT * FROM tbl WHERE name LIKE '%mark%' ;\n```\nSelect all rows that match the given case-insensitive expression formulated with the ILIKE operator:\n```\nSELECT * FROM tbl WHERE name ILIKE '%mark%' ;\n```\nSelect all rows that match the given composite expression:\n```\nSELECT * FROM tbl WHERE id = 3 OR id = 7 ;\n```\n\n### Syntax",
+      "content_chars": 713
+    },
+    {
+      "url": "https://duckdb.org/docs/current/guides/performance/indexing.html",
+      "title": "Indexing",
+      "content_preview": "DuckDB has two types of indexes: zonemaps and ART indexes.\n\n### Zonemaps\n\nDuckDB automatically creates zonemaps (also known as min-max indexes) for the columns of all general-purpose data types .\nOperations like predicate pushdown into scan operators and computing aggregations use zonemaps.\nIf a filter criterion (like WHERE column1 = 123 ) is in use, DuckDB can skip any row group whose min-max range does not contain that filter value (e.g., it can omit a block with a min-max range of 1000 to 2000 when comparing for = 123 or < 400 ).\n\n### The Effect of Ordering on Zonemaps\n\nThe more ordered the data within a column, the more valuable the zonemap indexes will be.\nFor example, a column could contain a random number on every row in the worst case.\nThen, DuckDB will likely be unable to skip any",
+      "content_chars": 5054
+    }
+  ]
+}
