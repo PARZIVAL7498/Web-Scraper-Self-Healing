@@ -1,4 +1,4 @@
-# Demo script (90 seconds) — Into the Scrape-Verse
+# Demo script (90 seconds) — Competitor Dashboard
 
 Pinned collector (same ID everywhere): `c_mt2z0drp1irsde3ydk`  
 Studio: https://brightdata.com/cp/scrapers/c_mt2z0drp1irsde3ydk  
@@ -18,18 +18,19 @@ python -m uvicorn chatbot.app:app --host 127.0.0.1 --port 8000
 
 | t | Screen | Say |
 |---|--------|-----|
-| 0–10s | UI sidebar: brand + collector id | “Docs scrapers die when the DOM moves. We health-check empty extracts.” |
-| 10–25s | Click **Break & self-heal** | “Demo break injects empty content. Timeline: Scrape → Health FAIL.” |
-| 25–55s | Timeline advances to Heal; terminal/`heal-log` shows `bdata scraper heal` | “Real `bdata scraper heal` on the same `c_*`. Then Studio re-run.” |
-| 55–75s | Timeline Index → done; status shows engine `bdata_cli` | “PASS, re-index Chroma. Proof artifact matches this collector.” |
-| 75–90s | RAG tab: ask one docs question; show citations | “OpenRouter answers from healed scrape with citations.” |
+| 0–12s | Compare tab: Vercel vs Railway | “Same category: deployment. We scrape both docs with Scraper Studio and put them on one dashboard.” |
+| 12–35s | Run compare → chart + citations | “Side-by-side: what they document, coverage signals, exportable report.” |
+| 35–55s | Ask the docs on one URL | “Then ask like an analyst. Answers cite the competitor’s own pages.” |
+| 55–80s | Break & self-heal timeline | “When their DOM moves, we don’t rewrite selectors. Real `bdata scraper heal` on the same `c_*`.” |
+| 80–90s | Index done + collector id | “Heal, re-index, keep watching. Self-healing RAG is the engine under the dashboard.” |
 
 ## Camera checklist
 
 1. Same `c_mt2z0drp1irsde3ydk` on UI, terminal, and Bright Data CP tab.
-2. Heal panel labels: empty extract = demo trigger; heal CLI = real.
-3. Do not paste API keys on camera.
-4. If heal is slow, cut to pre-recorded `docs/proof_self_heal_transcript.txt` then return to live chat.
+2. Lead with **Live compare**, not chat.
+3. Heal panel labels: empty extract = demo trigger; heal CLI = real.
+4. Do not paste API keys on camera.
+5. If heal is slow, cut to pre-recorded `docs/proof_self_heal_transcript.txt` then return to the compare report.
 
 ## LinkedIn (Daily Bugle)
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Self-Healing RAG — Bright Data Scraper Studio</title>
+    <title>Competitor Dashboard — Bright Data Scraper Studio</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -17,8 +17,8 @@
         <aside class="sidebar">
             <div class="brand-block">
                 <p class="brand-kicker">Bright Data · Scraper Studio</p>
-                <h1 class="brand-name">Self-Healing RAG</h1>
-                <p class="brand-tag">Docs scrape → heal → index → answer</p>
+                <h1 class="brand-name">Competitor Dashboard</h1>
+                <p class="brand-tag">Watch rivals. Heal the scrape. Compare what they ship.</p>
             </div>
 
             <section class="panel status-panel">
@@ -79,15 +79,15 @@
 
         <main class="main-plane">
             <nav class="nav-tabs" role="tablist">
-                <button type="button" class="tab-btn active" id="tab-chat" role="tab">RAG Q&amp;A</button>
-                <button type="button" class="tab-btn" id="tab-compare" role="tab">Live compare</button>
+                <button type="button" class="tab-btn" id="tab-chat" role="tab">Ask the docs</button>
+                <button type="button" class="tab-btn active" id="tab-compare" role="tab">Live compare</button>
             </nav>
 
-            <div class="tab-content" id="view-chat" role="tabpanel">
+            <div class="tab-content hidden" id="view-chat" role="tabpanel">
                 <header class="view-header">
                     <div>
-                        <h2>Ask the docs</h2>
-                        <p>Answers from indexed scrape with source citations.</p>
+                        <h2>Ask one competitor</h2>
+                        <p>Cited answers from that company’s indexed docs — after the scrape is healthy.</p>
                     </div>
                 </header>
 
@@ -97,7 +97,7 @@
                         type="url"
                         id="chat-url-input"
                         value="https://expressjs.com/en/guide/using-middleware.html"
-                        placeholder="https://duckdb.org/docs/"
+                        placeholder="https://vercel.com/docs"
                         required
                     />
                 </div>
@@ -106,7 +106,7 @@
                     <div class="message assistant-message">
                         <div class="avatar av-bot" aria-hidden="true">SV</div>
                         <div class="message-content">
-                            <p>Set a documentation URL, then ask a concrete question. If that site is already indexed, answers come from Chroma immediately—no multi-minute scrape.</p>
+                            <p>Paste a competitor docs URL, then ask how they position a feature. If that site is already indexed, answers come from Chroma immediately.</p>
                         </div>
                     </div>
                 </div>
@@ -115,7 +115,7 @@
                     <input
                         type="text"
                         id="user-input"
-                        placeholder="Ask about the target documentation…"
+                        placeholder="Ask how this competitor documents a feature…"
                         autocomplete="off"
                         required
                     />
@@ -123,11 +123,11 @@
                 </form>
             </div>
 
-            <div class="tab-content hidden" id="view-compare" role="tabpanel">
+            <div class="tab-content" id="view-compare" role="tabpanel">
                 <header class="view-header">
                     <div>
-                        <h2>Live dual-URL compare</h2>
-                        <p>Scrape both sides, index, then synthesize a side-by-side report.</p>
+                        <h2>Watch two competitors</h2>
+                        <p>Same category, two docs sites — scrape, index, then a side-by-side report.</p>
                     </div>
                 </header>
 
@@ -135,17 +135,17 @@
                     <form id="compare-form" class="compare-form panel">
                         <div class="url-input-grid">
                             <div class="form-group">
-                                <label for="url-a">Docs A</label>
-                                <input type="url" id="url-a" value="https://duckdb.org/docs/" required />
+                                <label for="url-a">Competitor A</label>
+                                <input type="url" id="url-a" value="https://vercel.com/docs" required />
                             </div>
                             <div class="form-group">
-                                <label for="url-b">Docs B</label>
-                                <input type="url" id="url-b" value="https://clickhouse.com/docs/" required />
+                                <label for="url-b">Competitor B</label>
+                                <input type="url" id="url-b" value="https://docs.railway.com" required />
                             </div>
                         </div>
                         <div class="form-group">
-                            <label for="topic">Topic</label>
-                            <input type="text" id="topic" value="Window functions, query performance, and architecture" required />
+                            <label for="topic">What to watch</label>
+                            <input type="text" id="topic" value="Deployment, preview environments, and pricing-adjacent platform features" required />
                         </div>
                         <button type="submit" class="btn btn-primary btn-block" id="btn-scrape-compare">
                             Scrape, check &amp; compare
