@@ -83,7 +83,7 @@ def heal_loop(collector_id: str, target_url: str, max_retries: int = 2, mock: bo
     """
     Main self-healing pipeline iteration loop.
     """
-    from run_scraper import is_placeholder_api_key, is_placeholder_collector, is_studio_ready
+    from docs_urls import is_placeholder_api_key, is_placeholder_collector, is_studio_ready
 
     bdata = _bdata_bin()
     sample_collector = is_placeholder_collector(collector_id)

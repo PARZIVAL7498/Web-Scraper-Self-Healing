@@ -9,15 +9,29 @@ remain seamlessly inside their sentences instead of splitting onto separate line
 import os
 import sys
 import json
-import re
 import argparse
 import subprocess
 from pathlib import Path
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urljoin
 from dotenv import load_dotenv
 
 import requests
 from bs4 import BeautifulSoup
+
+from docs_urls import (
+    extract_clean_brand,
+    is_placeholder_api_key,
+    is_placeholder_collector,
+    is_studio_ready,
+    normalize_page_url,
+    normalize_url,
+)
+from html_extract import (
+    clean_html_content,
+    clean_studio_content,
+    content_root,
+    extract_subpage_links,
+)
 
 load_dotenv()
 
@@ -32,212 +46,11 @@ SCRAPE_ALLOW_FALLBACK = os.getenv("SCRAPE_ALLOW_FALLBACK", "0").strip().lower() 
 # Last scrape engine used by this process (for /api/status)
 LAST_SCRAPE_ENGINE = "none"
 
-
-def is_placeholder_api_key(key: str | None) -> bool:
-    """True when Bright Data auth is missing or still the .env.example dummy."""
-    k = (key or "").strip()
-    if not k:
-        return True
-    lowered = k.lower()
-    return lowered.startswith("your_") or "api_key_here" in lowered
-
-
-def is_placeholder_collector(collector_id: str | None) -> bool:
-    """True for empty / sample / .env.example collector ids."""
-    cid = (collector_id or "").strip()
-    if not cid:
-        return True
-    lowered = cid.lower()
-    return (
-        lowered.startswith("c_sample")
-        or lowered.startswith("c_your_")
-        or "your_collector" in lowered
-        or "placeholder" in lowered
-    )
-
-
-def is_studio_ready(collector_id: str | None, api_key: str | None = None) -> bool:
-    """Studio CLI path requires a real collector and a real API key."""
-    key = BRIGHTDATA_API_KEY if api_key is None else api_key
-    return not is_placeholder_collector(collector_id) and not is_placeholder_api_key(key)
-
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
 }
-
-
-def normalize_url(url: str) -> str:
-    """Normalizes input URL by prepending https:// if protocol scheme is missing."""
-    if not url:
-        return "https://duckdb.org/docs/"
-    url = url.strip()
-    if not url.startswith(("http://", "https://")):
-        return "https://" + url
-    return url
-
-
-def extract_clean_brand(target_url: str) -> str:
-    """Extracts clean brand name from URL domain."""
-    target_url = normalize_url(target_url)
-    parsed = urlparse(target_url)
-    domain = (parsed.netloc or "unknown").replace("www.", "").lower()
-    parts = domain.split(".")
-
-    generic_subdomains = {
-        "docs", "doc", "documentation", "api", "developer", "developers", "documents", "Analysis", "debugging"
-        "v1", "v2", "v3", "help", "guide", "learn", "blog", "app", "dev", "portal", "orm"
-    }
-    common_tlds = {"com", "org", "io", "co", "dev", "net", "ai", "app", "rs", "sh", "uk", "ca", "team", "tech", "xyz"}
-
-    filtered = [p for p in parts if p not in generic_subdomains and p not in common_tlds]
-    name = filtered[0] if filtered else parts[0]
-    return name.capitalize()
-
-
-def _content_root(soup: BeautifulSoup):
-    """Prefer main/article content regions over full-page nav shells."""
-    for sel in ("main", "article", "[role='main']", ".markdown", ".theme-doc-markdown", "#content", ".content"):
-        node = soup.select_one(sel)
-        if node and len(node.get_text(strip=True)) > 80:
-            return node
-    return soup
-
-
-def clean_html_content(soup: BeautifulSoup) -> str:
-    """
-    Strips boilerplate tags and extracts clean text.
-    Preserves parent paragraph context so inline <code> chips stay inside sentences.
-    Prefers main/article regions and skips short nav-style list items.
-    """
-    root = _content_root(soup)
-    work = BeautifulSoup(str(root), "html.parser")
-
-    for tag in work(["script", "style", "nav", "footer", "header", "aside", "form", "svg", "noscript", "iframe"]):
-        tag.decompose()
-
-    noise_selectors = [
-        ".toc", ".sidebar", ".on-this-page", ".table-of-contents",
-        ".breadcrumb", ".nav-link", "#table-of-contents", ".onthispage",
-        ".theme-doc-toc-mobile", ".theme-doc-sidebar-container",
-        ".menu", ".navbar", ".DocSearch", ".sidebar-menu"
-    ]
-    for sel in noise_selectors:
-        for match in work.select(sel):
-            match.decompose()
-
-    elements = work.find_all(["h1", "h2", "h3", "p", "pre", "li", "tr"])
-    extracted_text = []
-
-    noise_phrases = [
-        "on this page", "table of contents", "skip to main content",
-        "edit this page", "was this page helpful", "next page", "previous page",
-        "search shortcut", "click here if you are not redirected"
-    ]
-
-    for elem in elements:
-        if elem.name in ("p", "li", "pre") and elem.find_parent("table"):
-            continue
-        text = elem.get_text(" ", strip=True)
-        if not text or len(text) < 3:
-            continue
-
-        if any(phrase in text.lower() for phrase in noise_phrases):
-            continue
-
-        if elem.name == "tr":
-            cells = [c.get_text(" ", strip=True) for c in elem.find_all(["th", "td"])]
-            cells = [c for c in cells if c]
-            if len(cells) >= 2:
-                extracted_text.append(f"{cells[0]}: {' '.join(cells[1:])}")
-            continue
-
-        if elem.name in ["h1", "h2", "h3"]:
-            extracted_text.append(f"\n### {text}\n")
-        elif elem.name == "pre":
-            extracted_text.append(f"```\n{text}\n```")
-        elif elem.name == "li":
-            # Skip short nav-style bullets (TOC noise); keep explanatory list items
-            if len(text) < 45 and "\n" not in text and text.count(" ") < 6:
-                continue
-            if text.lower() in {
-                "copying an in-memory database to a file",
-                "see this page as markdown",
-                "report content issue",
-            }:
-                continue
-            extracted_text.append(f"• {text}")
-        else:
-            extracted_text.append(text)
-
-    full_text = "\n".join(extracted_text)
-    cleaned = re.sub(r'\n{3,}', '\n\n', full_text).strip()
-    return cleaned
-
-
-def _link_content_score(url: str, anchor_text: str = "") -> int:
-    """Higher score = more likely to be a prose docs page (not install/home/TOC)."""
-    path = urlparse(url).path.lower()
-    text = (anchor_text or "").lower()
-    score = 0
-    preferred = (
-        "overview", "getting-started", "guide", "tutorial", "api",
-        "connect", "client", "python", "installing", "starter", "introduction",
-        "sql", "query", "architecture", "feature", "hello-world"
-    )
-    demoted = ("#", "/install/", "/blog/", "/community/", "/search", "/cdn-cgi/", "/reference")
-    for token in preferred:
-        if token in path or token in text:
-            score += 3
-    if path.rstrip("/").endswith("/reference") or "/reference/" in path:
-        score -= 4
-    for token in demoted:
-        if token in path:
-            score -= 5
-    depth = path.count("/")
-    if depth >= 3:
-        score += 2
-    if path.endswith("/") or path.endswith("/index") or path.endswith("/index.html"):
-        score -= 1
-    return score
-
-
-def extract_subpage_links(soup: BeautifulSoup, base_url: str, max_links: int = 4) -> list:
-    """Finds ranked internal documentation subpage links matching the target domain."""
-    base_url = normalize_url(base_url)
-    parsed_base = urlparse(base_url)
-    base_domain = parsed_base.netloc
-    candidates = []
-
-    scope = _content_root(soup)
-    for a_tag in scope.find_all("a", href=True):
-        href = a_tag["href"].strip()
-        if not href or href.startswith(("#", "mailto:", "javascript:")):
-            continue
-        full_url = urljoin(base_url, href).split("#")[0].rstrip("/") or urljoin(base_url, href)
-        parsed_url = urlparse(full_url)
-
-        if (parsed_url.netloc == base_domain and
-            parsed_url.scheme in ["http", "https"] and
-            full_url != base_url.rstrip("/") and
-            not any(ext in parsed_url.path.lower() for ext in [".png", ".jpg", ".jpeg", ".gif", ".svg", ".pdf", ".zip", ".css", ".js"])):
-            anchor = a_tag.get_text(" ", strip=True)
-            candidates.append((_link_content_score(full_url, anchor), full_url))
-
-    # Prefer higher-scoring unique URLs
-    seen = set()
-    ranked = []
-    for _score, url in sorted(candidates, key=lambda x: x[0], reverse=True):
-        key = url.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        ranked.append(url)
-        if len(ranked) >= max_links:
-            break
-
-    return ranked
 
 
 def fetch_html(url: str, timeout: int = 45) -> tuple:
@@ -326,11 +139,11 @@ def scrape_live_url(target_url: str, max_pages: int = 4) -> list:
 
             prose_chars = sum(
                 len(p.get_text(strip=True))
-                for p in (_content_root(soup).find_all("p") or [])
+                for p in (content_root(soup).find_all("p") or [])
                 if len(p.get_text(strip=True)) > 40
             )
             is_low_value = prose_chars < 120 or len(content) < 200
-            is_target = final_url.rstrip("/").lower() == target_url.rstrip("/").lower()
+            is_target = normalize_page_url(final_url) == normalize_page_url(target_url)
 
             if content and len(content) > 30 and (is_target or not is_low_value):
                 scraped_pages.append({
@@ -365,26 +178,6 @@ def scrape_live_url(target_url: str, max_pages: int = 4) -> list:
     return scraped_pages
 
 
-def _looks_like_html(text: str) -> bool:
-    sample = (text or "")[:2000].lower()
-    return "<html" in sample or "<div" in sample or "<p" in sample or "<article" in sample
-
-
-def _clean_studio_content(content: str) -> str:
-    """If Bright Data returns HTML, strip to prose/code via clean_html_content."""
-    content = (content or "").strip()
-    if not content:
-        return ""
-    if _looks_like_html(content):
-        try:
-            soup = BeautifulSoup(content, "html.parser")
-            cleaned = clean_html_content(soup)
-            return cleaned if cleaned else soup.get_text("\n", strip=True)
-        except Exception:
-            return content
-    return content
-
-
 def _normalize_scrape_records(raw, fallback_url: str) -> list:
     """Normalize Bright Data CLI / API payloads into [{url, title, content}, ...]."""
     if raw is None:
@@ -417,7 +210,7 @@ def _normalize_scrape_records(raw, fallback_url: str) -> list:
         )
         if isinstance(content, list):
             content = "\n".join(str(x) for x in content)
-        content = _clean_studio_content(str(content))
+        content = clean_studio_content(str(content))
         if not content:
             extras = []
             for k, v in item.items():
@@ -425,7 +218,7 @@ def _normalize_scrape_records(raw, fallback_url: str) -> list:
                     continue
                 if v.strip():
                     extras.append(v.strip())
-            content = _clean_studio_content("\n\n".join(extras))
+            content = clean_studio_content("\n\n".join(extras))
         if content and len(content) >= 30:
             pages.append({"url": url, "title": str(title).strip(), "content": content})
     return pages
@@ -491,7 +284,7 @@ def run_bdata_scraper(collector_id: str, target_url: str, output_path: Path, moc
             json.dump(data, f, indent=2)
         return data
 
-    studio_ready = is_studio_ready(collector_id)
+    studio_ready = is_studio_ready(collector_id, BRIGHTDATA_API_KEY)
     has_bdata = bool(shutil_which("bdata") or shutil_which("brightdata"))
     cli_success = False
     data = []

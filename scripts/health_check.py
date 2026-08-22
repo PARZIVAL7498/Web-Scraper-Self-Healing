@@ -7,28 +7,15 @@ Validates scraped JSON payload against health criteria:
 Outputs PASS (exit code 0) or FAIL (exit code 1) with failure reason.
 """
 
-import os
 import sys
 import json
 import argparse
 from pathlib import Path
-from urllib.parse import urlparse
+
+from docs_urls import get_domain
 
 DEFAULT_LATEST_PATH = Path(__file__).resolve().parent.parent / "data" / "latest_scrape.json"
 DEFAULT_BASELINE_PATH = Path(__file__).resolve().parent.parent / "data" / "last_known_good.json"
-
-
-def normalize_url(url: str) -> str:
-    """Normalizes URL by prepending https:// if protocol scheme is missing."""
-    url = url.strip()
-    if not url.startswith(("http://", "https://")):
-        return "https://" + url
-    return url
-
-
-def get_domain(url: str) -> str:
-    """Extracts domain netloc from URL."""
-    return urlparse(normalize_url(url)).netloc.lower()
 
 
 def check_health(latest_path: Path, baseline_path: Path) -> tuple:

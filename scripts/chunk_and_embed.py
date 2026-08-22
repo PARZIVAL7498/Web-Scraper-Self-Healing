@@ -5,54 +5,19 @@ Reads scraped JSON from `data/latest_scrape.json`, splits page content into clea
 and embeds them into a local ChromaDB collection (`docs_rag`) using sentence-transformers/all-MiniLM-L6-v2.
 """
 
-import os
-import sys
 import json
 import argparse
 from pathlib import Path
-from typing import List, Dict, Any
-from urllib.parse import urlparse
+from typing import List
 
 import chromadb
 from chromadb.utils import embedding_functions
 
+from docs_urls import extract_competitor_tag, normalize_page_url
+
 DEFAULT_INPUT_PATH = Path(__file__).resolve().parent.parent / "data" / "latest_scrape.json"
 CHROMA_DB_DIR = Path(__file__).resolve().parent.parent / "data" / "chroma_db"
 COLLECTION_NAME = "docs_rag"
-
-
-def normalize_url(url: str) -> str:
-    """Normalizes input URL by prepending https:// if protocol scheme is missing."""
-    if not url:
-        return "https://duckdb.org/docs/"
-    url = url.strip()
-    if not url.startswith(("http://", "https://")):
-        return "https://" + url
-    return url
-
-
-def extract_competitor_tag(url: str) -> str:
-    """Extracts clean competitor brand tag from URL (e.g., 'Temporal', 'Duckdb', 'Render', 'Deno', 'Drizzle')."""
-    url = normalize_url(url)
-    parsed = urlparse(url)
-    domain = (parsed.netloc or "unknown").replace("www.", "").lower()
-    parts = domain.split(".")
-
-    generic_subdomains = {
-        "docs", "doc", "documentation", "api", "developer", "developers",
-        "v1", "v2", "v3", "help", "guide", "learn", "blog", "app", "dev", "portal", "orm"
-    }
-    common_tlds = {"com", "org", "io", "co", "dev", "net", "ai", "app", "rs", "sh", "uk", "ca", "team", "tech", "xyz"}
-
-    filtered = [p for p in parts if p not in generic_subdomains and p not in common_tlds]
-
-    if filtered:
-        name = filtered[0]
-    else:
-        non_tld = [p for p in parts if p not in common_tlds]
-        name = non_tld[0] if non_tld else parts[0]
-
-    return name.capitalize()
 
 
 def split_text_into_chunks(text: str, chunk_size: int = 500, chunk_overlap: int = 50) -> List[str]:
@@ -100,10 +65,6 @@ def split_text_into_chunks(text: str, chunk_size: int = 500, chunk_overlap: int 
             i += 1
 
     return merged
-
-
-def _norm_page_url(url: str) -> str:
-    return (url or "").strip().lower().split("#")[0].rstrip("/")
 
 
 def chunk_and_embed(input_path: Path = DEFAULT_INPUT_PATH, competitor_tag: str = None, page_scoped: bool = False) -> int:
@@ -179,10 +140,10 @@ def chunk_and_embed(input_path: Path = DEFAULT_INPUT_PATH, competitor_tag: str =
         existing = collection.get(where={"competitor": tag_for_delete}, include=["metadatas"])
         old_ids = existing.get("ids") or []
         if page_scoped:
-            keep_urls = {_norm_page_url(p.get("url", "")) for p in pages}
+            keep_urls = {normalize_page_url(p.get("url", "")) for p in pages}
             old_ids = [
                 i for i, m in zip(old_ids, existing.get("metadatas") or [])
-                if _norm_page_url((m or {}).get("url", "")) in keep_urls
+                if normalize_page_url((m or {}).get("url", "")) in keep_urls
             ]
         if old_ids:
             collection.delete(ids=old_ids)

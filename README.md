@@ -97,7 +97,7 @@ cp .env.example .env
 
 ```env
 BRIGHTDATA_API_KEY=your_api_key_here
-BRIGHTDATA_COLLECTOR_ID=c_your_collector_id_here
+BRIGHTDATA_COLLECTOR_ID=c_mt2z0drp1irsde3ydk
 TARGET_URL=https://duckdb.org/docs/
 OPENROUTER_API_KEY=your_openrouter_api_key_here
 OPENROUTER_MODEL=openai/gpt-4o-mini
@@ -127,6 +127,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000). Confirm collector + engine 
 | UI only | `python start.py --skip-heal` |
 | Demo a broken scrape then heal | `python start.py --mock-unhealthy` |
 | Windows | `.\run.ps1` or `run.bat` |
+| Unit tests | `python -m unittest discover -s tests -v` |
 
 ---
 
