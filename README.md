@@ -2,7 +2,7 @@
 
 <img src="docs/competition-dashboard-banner.jpg" alt="COMPETITION DASHBOARD" width="100%" />
 
-# Competitor Dashboard
+# Competition Dashboard
 
 **Watch the companies that sell the same thing you do — and see where they are winning.**
 
