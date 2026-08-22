@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/self-healing-rag-banner.png" alt="Competitor Dashboard" width="100%" />
+<img src="docs/competition-dashboard-banner.jpg" alt="COMPETITION DASHBOARD" width="100%" />
 
 # Competitor Dashboard
 
@@ -342,7 +342,7 @@ Manual run can set `mock_mode` or `mock_unhealthy`. Scheduled runs require the B
 ├── tests/                           # unittest discover -s tests
 ├── data/                            # scrapes, baseline, heal status, Chroma
 ├── docs/
-│   ├── self-healing-rag-banner.png
+│   ├── competition-dashboard-banner.jpg
 │   └── DEMO_SCRIPT.md
 └── .github/workflows/
     ├── ci.yml
