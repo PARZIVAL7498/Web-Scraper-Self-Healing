@@ -1,0 +1,98 @@
+name: Scrape, heal, and index
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      mock_mode:
+        description: Skip real bdata CLI (no live heal)
+        required: false
+        type: boolean
+        default: false
+      mock_unhealthy:
+        description: Inject an empty first scrape, then run the real heal loop
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scrape-and-heal
+  cancel-in-progress: false
+
+jobs:
+  scrape-and-heal:
+    name: Self-healing pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check Bright Data secrets
+        id: secrets
+        env:
+          BRIGHTDATA_API_KEY: ${{ secrets.BRIGHTDATA_API_KEY }}
+          BRIGHTDATA_COLLECTOR_ID: ${{ secrets.BRIGHTDATA_COLLECTOR_ID }}
+        run: |
+          if [ -z "$BRIGHTDATA_API_KEY" ] || [ -z "$BRIGHTDATA_COLLECTOR_ID" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::BRIGHTDATA_API_KEY or BRIGHTDATA_COLLECTOR_ID is missing."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fail scheduled run without secrets
+        if: github.event_name == 'schedule' && steps.secrets.outputs.present != 'true'
+        run: |
+          echo "Scheduled heal requires BRIGHTDATA_API_KEY and BRIGHTDATA_COLLECTOR_ID."
+          exit 1
+
+      - name: Install Bright Data CLI
+        if: steps.secrets.outputs.present == 'true'
+        run: |
+          npm install -g @brightdata/cli
+          bdata login --api-key "${{ secrets.BRIGHTDATA_API_KEY }}"
+
+      - name: Run scrape → health → heal → index
+        env:
+          BRIGHTDATA_API_KEY: ${{ secrets.BRIGHTDATA_API_KEY }}
+          BRIGHTDATA_COLLECTOR_ID: ${{ secrets.BRIGHTDATA_COLLECTOR_ID }}
+          BRIGHTDATA_ZONE: ${{ vars.BRIGHTDATA_ZONE || 'cli_unlocker' }}
+          TARGET_URL: ${{ vars.TARGET_URL || 'https://duckdb.org/docs/' }}
+          SCRAPE_ALLOW_FALLBACK: ${{ vars.SCRAPE_ALLOW_FALLBACK || '0' }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          FLAGS=()
+          if [ "${{ github.event.inputs.mock_mode }}" = "true" ] || [ "${{ steps.secrets.outputs.present }}" != "true" ]; then
+            FLAGS+=(--mock)
+          fi
+          if [ "${{ github.event.inputs.mock_unhealthy }}" = "true" ]; then
+            FLAGS+=(--mock-unhealthy)
+          fi
+          python scripts/heal_loop.py "${FLAGS[@]}"
+
+      - name: Commit healthy baseline
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(ci): update scrape baseline after health pass"
+          file_pattern: data/last_known_good.json data/heal_job_status.json data/last_heal_at.txt
+          commit_user_name: github-actions[bot]
+          commit_user_email: github-actions[bot]@users.noreply.github.com

@@ -1,0 +1,12 @@
+[
+  {
+    "url": "https://docs.temporal.io/",
+    "title": "Temporal Developer Documentation",
+    "content": "Temporal is an open-source durable execution platform that ensures reliable execution of long-running, fault-tolerant workflows and microservices."
+  },
+  {
+    "url": "https://docs.temporal.io/concepts/workflows",
+    "title": "Temporal Workflows & Activities",
+    "content": "Temporal Workflows orchestrate resilient functions called Activities, persisting complete state history across service restarts and network drops."
+  }
+]

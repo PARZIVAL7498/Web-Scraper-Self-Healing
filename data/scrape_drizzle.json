@@ -1,0 +1,12 @@
+[
+  {
+    "url": "https://orm.drizzle.team/docs/overview",
+    "title": "Drizzle ORM Overview & Overview",
+    "content": "Drizzle ORM is a lightweight, type-safe TypeScript ORM for SQL databases (PostgreSQL, MySQL, SQLite) featuring zero dependencies and max query performance."
+  },
+  {
+    "url": "https://orm.drizzle.team/docs/overviewdocs/sql-schema-declaration",
+    "title": "Drizzle Schema Declaration",
+    "content": "Drizzle allows defining SQL schema directly in TypeScript with full auto-completion, relational queries, and automatic migration generation."
+  }
+]
