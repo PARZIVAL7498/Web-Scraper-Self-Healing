@@ -102,7 +102,11 @@ def split_text_into_chunks(text: str, chunk_size: int = 500, chunk_overlap: int 
     return merged
 
 
-def chunk_and_embed(input_path: Path = DEFAULT_INPUT_PATH, competitor_tag: str = None) -> int:
+def _norm_page_url(url: str) -> str:
+    return (url or "").strip().lower().split("#")[0].rstrip("/")
+
+
+def chunk_and_embed(input_path: Path = DEFAULT_INPUT_PATH, competitor_tag: str = None, page_scoped: bool = False) -> int:
     """Reads JSON pages, splits content into vector chunks, and upserts to local ChromaDB."""
     if not input_path.exists():
         print(f"[CHUNK_EMBED] ❌ Input file not found: {input_path}")
@@ -168,11 +172,18 @@ def chunk_and_embed(input_path: Path = DEFAULT_INPUT_PATH, competitor_tag: str =
 
     print(f"[CHUNK_EMBED] ⚙️ Upserting {total_chunks} chunks into ChromaDB collection '{COLLECTION_NAME}'...")
 
-    # Replace prior vectors for this competitor so stale stub/mock pages cannot pollute retrieval
+    # Replace prior vectors so stale stub/mock pages cannot pollute retrieval.
+    # page_scoped=True only drops chunks for the URLs being re-indexed.
     tag_for_delete = competitor_tag if competitor_tag else extract_competitor_tag(pages[0].get("url", ""))
     try:
-        existing = collection.get(where={"competitor": tag_for_delete})
+        existing = collection.get(where={"competitor": tag_for_delete}, include=["metadatas"])
         old_ids = existing.get("ids") or []
+        if page_scoped:
+            keep_urls = {_norm_page_url(p.get("url", "")) for p in pages}
+            old_ids = [
+                i for i, m in zip(old_ids, existing.get("metadatas") or [])
+                if _norm_page_url((m or {}).get("url", "")) in keep_urls
+            ]
         if old_ids:
             collection.delete(ids=old_ids)
             print(f"[CHUNK_EMBED] 🧹 Removed {len(old_ids)} stale chunks for competitor '{tag_for_delete}'")

@@ -35,7 +35,12 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini").strip() or "openai/gpt-4o-mini"
-BRIGHTDATA_COLLECTOR_ID = os.getenv("BRIGHTDATA_COLLECTOR_ID", "c_sample_collector_12345")
+
+
+def _collector_id() -> str:
+    return os.getenv("BRIGHTDATA_COLLECTOR_ID", "c_sample_collector_12345")
+
+
 LAST_HEAL_AT_PATH = DATA_DIR / "last_heal_at.txt"
 
 sys.path.append(str(BASE_DIR / "scripts"))
@@ -129,7 +134,24 @@ def truncate_word_boundary(text: str, max_chars: int = 550) -> str:
     return trimmed + "..."
 
 
-def _chunk_relevance_score(query: str, text: str) -> float:
+def _norm_page_url(url: str) -> str:
+    return (url or "").strip().lower().split("#")[0].rstrip("/")
+
+
+def _is_specific_docs_page(url: str) -> bool:
+    """True when the user pointed at a concrete docs page, not a site/docs root."""
+    parts = [p for p in urlparse(_norm_page_url(url)).path.split("/") if p]
+    generic = {"docs", "doc", "documentation", "en", "current", "latest", "api", "guide", "reference", "www"}
+    return any(p.lower() not in generic for p in parts)
+
+
+def _url_path_query_terms(url: str) -> str:
+    raw = urlparse(_norm_page_url(url)).path.replace("-", " ").replace("_", " ").replace("/", " ")
+    stop = {"docs", "doc", "html", "htm", "api", "current", "latest", "www", "guide", "en"}
+    return " ".join(t for t in raw.split() if len(t) > 2 and t.lower() not in stop)
+
+
+def _chunk_relevance_score(query: str, text: str, url: str = "", target_url: str = "") -> float:
     """Prefer chunks that match the query AND contain real explanatory content/code."""
     q_terms = [t for t in query.lower().split() if len(t) > 2]
     lower = text.lower()
@@ -137,15 +159,20 @@ def _chunk_relevance_score(query: str, text: str) -> float:
     substance = min(len(text), 1200) / 1200.0
     has_code = 1.5 if "```" in text or "require(" in text or "import " in text else 0.0
     heading_penalty = -2.0 if len(text) < 100 else 0.0
-    return overlap * 2.0 + substance + has_code + heading_penalty
+    url_boost = 8.0 if target_url and _norm_page_url(url) == _norm_page_url(target_url) else 0.0
+    return overlap * 2.0 + substance + has_code + heading_penalty + url_boost
 
 
-def synthesize_local_answer(query: str, chunks: List[Dict[str, Any]]) -> str:
+def synthesize_local_answer(query: str, chunks: List[Dict[str, Any]], target_url: str = "") -> str:
     """
     Local (no-LLM) answer builder: ranks retrieved chunks by query relevance + substance,
     then writes a direct answer with the best prose/code — not just titles and links.
     """
-    ranked = sorted(chunks, key=lambda c: _chunk_relevance_score(query, c.get("text", "")), reverse=True)
+    ranked = sorted(
+        chunks,
+        key=lambda c: _chunk_relevance_score(query, c.get("text", ""), c.get("url", ""), target_url),
+        reverse=True,
+    )
 
     # Keep the most useful passages (allow multiple from the same page)
     selected = []
@@ -182,7 +209,7 @@ def synthesize_local_answer(query: str, chunks: List[Dict[str, Any]]) -> str:
     return "\n".join(answer_parts)
 
 
-def generate_llm_answer(query: str, chunks: List[Dict[str, Any]]) -> str:
+def generate_llm_answer(query: str, chunks: List[Dict[str, Any]], target_url: str = "") -> str:
     """
     Clean RAG Answer Synthesizer with Word Boundary Truncation.
     Generates structured Markdown grounded strictly in retrieved live web text.
@@ -233,7 +260,7 @@ def generate_llm_answer(query: str, chunks: List[Dict[str, Any]]) -> str:
     if not chunks:
         return "I couldn't find any relevant documentation context in the vector database to answer your question."
 
-    return synthesize_local_answer(query, chunks)
+    return synthesize_local_answer(query, chunks, target_url=target_url)
 
 
 def compute_doc_coverage_scores(chunks: List[Dict]) -> List[int]:
@@ -376,7 +403,7 @@ def get_status():
         "indexed_chunks": count,
         "baseline_pages": baseline_count,
         "llm_provider": _llm_provider_name(),
-        "collector_id": BRIGHTDATA_COLLECTOR_ID,
+        "collector_id": _collector_id(),
         "scrape_engine": engine,
         "last_heal_at": last_heal_at,
         "openrouter_model": OPENROUTER_MODEL if _llm_provider_name() == "OpenRouter" else None,
@@ -392,7 +419,7 @@ def chat(request: ChatRequest):
     target_url = normalize_url(request.url or "https://duckdb.org/docs/")
     comp_tag = extract_competitor_tag(target_url)
 
-    collector_id = BRIGHTDATA_COLLECTOR_ID
+    collector_id = _collector_id()
     file_path = DATA_DIR / f"scrape_{comp_tag.lower()}.json"
     collection = get_chroma_collection()
 
@@ -405,31 +432,51 @@ def chat(request: ChatRequest):
         except Exception:
             return False
 
+    def _has_page_chunks(page_url: str) -> bool:
+        if not collection or collection.count() == 0:
+            return False
+        try:
+            sample = collection.get(where={"competitor": comp_tag}, include=["metadatas"])
+            want = _norm_page_url(page_url)
+            return any(_norm_page_url((m or {}).get("url", "")) == want for m in (sample.get("metadatas") or []))
+        except Exception:
+            return False
+
+    specific_page = _is_specific_docs_page(target_url)
+    need_scrape = (not _has_competitor_chunks()) or (specific_page and not _has_page_chunks(target_url))
+
     # Avoid multi-minute Studio scrape on every chat turn (causes browser "Failed to fetch")
-    if not _has_competitor_chunks():
+    if need_scrape:
         try:
             run_bdata_scraper(
                 collector_id=collector_id,
                 target_url=target_url,
                 output_path=file_path,
                 mock=False,
+                max_pages=1 if specific_page else 4,
             )
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"Scrape failed (Studio-first): {e}")
-        chunk_and_embed(input_path=file_path, competitor_tag=comp_tag)
+        chunk_and_embed(input_path=file_path, competitor_tag=comp_tag, page_scoped=specific_page)
         collection = get_chroma_collection()
 
+    retrieval_query = request.query
+    path_terms = _url_path_query_terms(target_url)
+    if path_terms:
+        retrieval_query = f"{request.query} {path_terms}"
+
     try:
-        n = min(request.top_k or 4, max(collection.count(), 1)) if collection else 4
+        pool = min(12, max(collection.count(), 1)) if collection else 4
+        n = pool if specific_page else min(request.top_k or 4, pool)
         results = collection.query(
-            query_texts=[request.query],
+            query_texts=[retrieval_query],
             where={"competitor": comp_tag},
             n_results=n,
         ) if collection else {}
 
         if not results or not results.get("documents") or not results["documents"][0]:
             results = collection.query(
-                query_texts=[request.query],
+                query_texts=[retrieval_query],
                 n_results=n,
             ) if collection else {}
     except Exception as e:
@@ -453,14 +500,36 @@ def chat(request: ChatRequest):
                 "chunk_index": meta.get("chunk_index", 0)
             })
 
-            if not any(c["url"] == url for c in citations):
-                citations.append({
-                    "id": len(citations) + 1,
-                    "title": title,
-                    "url": url
-                })
+    if specific_page:
+        page_chunks = [c for c in retrieved_chunks if _norm_page_url(c["url"]) == _norm_page_url(target_url)]
+        if page_chunks:
+            retrieved_chunks = page_chunks
+        elif collection:
+            # Semantic search drifted; pull the indexed target page directly.
+            try:
+                dumped = collection.get(where={"competitor": comp_tag}, include=["documents", "metadatas"])
+                want = _norm_page_url(target_url)
+                retrieved_chunks = []
+                for doc, meta in zip(dumped.get("documents") or [], dumped.get("metadatas") or []):
+                    if _norm_page_url((meta or {}).get("url", "")) == want:
+                        retrieved_chunks.append({
+                            "text": doc,
+                            "url": (meta or {}).get("url", target_url),
+                            "title": (meta or {}).get("title", f"{comp_tag} Page"),
+                            "chunk_index": (meta or {}).get("chunk_index", 0),
+                        })
+            except Exception:
+                pass
 
-    answer = generate_llm_answer(request.query, retrieved_chunks)
+    for c in retrieved_chunks:
+        if not any(x["url"] == c["url"] for x in citations):
+            citations.append({
+                "id": len(citations) + 1,
+                "title": c["title"],
+                "url": c["url"],
+            })
+
+    answer = generate_llm_answer(request.query, retrieved_chunks, target_url=target_url)
 
     return {
         "query": request.query,
@@ -481,7 +550,7 @@ def scrape_and_compare(req: CompareRequest):
     comp_a = extract_competitor_tag(url_a)
     comp_b = extract_competitor_tag(url_b)
 
-    collector_id = BRIGHTDATA_COLLECTOR_ID
+    collector_id = _collector_id()
 
     file_a = DATA_DIR / f"scrape_{comp_a.lower()}.json"
     file_b = DATA_DIR / f"scrape_{comp_b.lower()}.json"
@@ -536,7 +605,7 @@ def heal_status():
     status_path = DATA_DIR / "heal_job_status.json"
     payload = {
         "phase": "idle",
-        "collector_id": BRIGHTDATA_COLLECTOR_ID,
+        "collector_id": _collector_id(),
         "attempt": None,
         "health_reason": "",
         "engine": "",
@@ -570,7 +639,7 @@ def trigger_scrape(req: TriggerScrapeRequest, background_tasks: BackgroundTasks)
         from datetime import datetime, timezone
         seed = {
             "phase": "scrape",
-            "collector_id": BRIGHTDATA_COLLECTOR_ID,
+            "collector_id": _collector_id(),
             "attempt": 1,
             "health_reason": "",
             "engine": "",
@@ -589,7 +658,7 @@ def trigger_scrape(req: TriggerScrapeRequest, background_tasks: BackgroundTasks)
     return {
         "message": "Self-healing pipeline trigger initiated!",
         "mock_unhealthy": req.mock_unhealthy,
-        "collector_id": BRIGHTDATA_COLLECTOR_ID,
+        "collector_id": _collector_id(),
     }
 
 

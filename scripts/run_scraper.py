@@ -32,6 +32,35 @@ SCRAPE_ALLOW_FALLBACK = os.getenv("SCRAPE_ALLOW_FALLBACK", "0").strip().lower() 
 # Last scrape engine used by this process (for /api/status)
 LAST_SCRAPE_ENGINE = "none"
 
+
+def is_placeholder_api_key(key: str | None) -> bool:
+    """True when Bright Data auth is missing or still the .env.example dummy."""
+    k = (key or "").strip()
+    if not k:
+        return True
+    lowered = k.lower()
+    return lowered.startswith("your_") or "api_key_here" in lowered
+
+
+def is_placeholder_collector(collector_id: str | None) -> bool:
+    """True for empty / sample / .env.example collector ids."""
+    cid = (collector_id or "").strip()
+    if not cid:
+        return True
+    lowered = cid.lower()
+    return (
+        lowered.startswith("c_sample")
+        or lowered.startswith("c_your_")
+        or "your_collector" in lowered
+        or "placeholder" in lowered
+    )
+
+
+def is_studio_ready(collector_id: str | None, api_key: str | None = None) -> bool:
+    """Studio CLI path requires a real collector and a real API key."""
+    key = BRIGHTDATA_API_KEY if api_key is None else api_key
+    return not is_placeholder_collector(collector_id) and not is_placeholder_api_key(key)
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -98,7 +127,7 @@ def clean_html_content(soup: BeautifulSoup) -> str:
         for match in work.select(sel):
             match.decompose()
 
-    elements = work.find_all(["h1", "h2", "h3", "p", "pre", "li"])
+    elements = work.find_all(["h1", "h2", "h3", "p", "pre", "li", "tr"])
     extracted_text = []
 
     noise_phrases = [
@@ -108,11 +137,20 @@ def clean_html_content(soup: BeautifulSoup) -> str:
     ]
 
     for elem in elements:
+        if elem.name in ("p", "li", "pre") and elem.find_parent("table"):
+            continue
         text = elem.get_text(" ", strip=True)
         if not text or len(text) < 3:
             continue
 
         if any(phrase in text.lower() for phrase in noise_phrases):
+            continue
+
+        if elem.name == "tr":
+            cells = [c.get_text(" ", strip=True) for c in elem.find_all(["th", "td"])]
+            cells = [c for c in cells if c]
+            if len(cells) >= 2:
+                extracted_text.append(f"{cells[0]}: {' '.join(cells[1:])}")
             continue
 
         if elem.name in ["h1", "h2", "h3"]:
@@ -292,8 +330,9 @@ def scrape_live_url(target_url: str, max_pages: int = 4) -> list:
                 if len(p.get_text(strip=True)) > 40
             )
             is_low_value = prose_chars < 120 or len(content) < 200
+            is_target = final_url.rstrip("/").lower() == target_url.rstrip("/").lower()
 
-            if content and len(content) > 30 and not is_low_value:
+            if content and len(content) > 30 and (is_target or not is_low_value):
                 scraped_pages.append({
                     "url": final_url,
                     "title": title,
@@ -399,8 +438,10 @@ def run_bdata_cli(collector_id: str, target_url: str) -> list:
     if not bdata_bin:
         raise FileNotFoundError("bdata CLI not found on PATH")
 
-    if not collector_id or collector_id.startswith("c_sample"):
+    if is_placeholder_collector(collector_id):
         raise ValueError(f"Invalid/placeholder collector id: {collector_id}")
+    if is_placeholder_api_key(BRIGHTDATA_API_KEY):
+        raise ValueError("Bright Data API key is missing or still a placeholder")
 
     command = [bdata_bin, "scraper", "run", collector_id, target_url, "--json"]
     print(f"[RUN_SCRAPER] 🚀 Executing Bright Data CLI: {' '.join(command)}")
@@ -432,7 +473,7 @@ def run_bdata_cli(collector_id: str, target_url: str) -> list:
     return pages
 
 
-def run_bdata_scraper(collector_id: str, target_url: str, output_path: Path, mock: bool = False, mock_unhealthy: bool = False) -> list:
+def run_bdata_scraper(collector_id: str, target_url: str, output_path: Path, mock: bool = False, mock_unhealthy: bool = False, max_pages: int = 4) -> list:
     """
     Priority:
       1) Bright Data CLI (`bdata scraper run`) when collector id is real (mandatory unless SCRAPE_ALLOW_FALLBACK=1)
@@ -450,12 +491,12 @@ def run_bdata_scraper(collector_id: str, target_url: str, output_path: Path, moc
             json.dump(data, f, indent=2)
         return data
 
-    has_real_collector = bool(collector_id) and not str(collector_id).startswith("c_sample")
+    studio_ready = is_studio_ready(collector_id)
     has_bdata = bool(shutil_which("bdata") or shutil_which("brightdata"))
     cli_success = False
     data = []
 
-    if not mock and has_bdata and has_real_collector:
+    if not mock and has_bdata and studio_ready:
         try:
             data = run_bdata_cli(collector_id, target_url)
             cli_success = True
@@ -467,21 +508,23 @@ def run_bdata_scraper(collector_id: str, target_url: str, output_path: Path, moc
                 ) from err
             print("[RUN_SCRAPER] ⚠️ SCRAPE_ALLOW_FALLBACK=1 — switching to Unlocker/HTTP.")
 
-    elif not mock and has_real_collector and not has_bdata and not SCRAPE_ALLOW_FALLBACK:
+    elif not mock and studio_ready and not has_bdata and not SCRAPE_ALLOW_FALLBACK:
         raise RuntimeError(
             "bdata CLI not found on PATH. Install with `npm i -g @brightdata/cli` "
             "or set SCRAPE_ALLOW_FALLBACK=1 for emergency Unlocker/HTTP mode."
         )
+    elif not mock and not studio_ready:
+        print("[RUN_SCRAPER] ℹ️ Bright Data not configured (placeholder key/collector). Using direct HTTP scrape.")
 
     if not cli_success:
-        if not SCRAPE_ALLOW_FALLBACK and has_real_collector:
+        if not SCRAPE_ALLOW_FALLBACK and studio_ready:
             raise RuntimeError("Studio-first scrape required but bdata path did not succeed.")
-        if BRIGHTDATA_API_KEY and BRIGHTDATA_API_KEY != "your_brightdata_api_key_here":
+        if not is_placeholder_api_key(BRIGHTDATA_API_KEY):
             print(f"[RUN_SCRAPER] 🚀 Using Bright Data Web Unlocker API (zone={BRIGHTDATA_ZONE})")
             LAST_SCRAPE_ENGINE = "web_unlocker"
         else:
             LAST_SCRAPE_ENGINE = "direct_http"
-        data = scrape_live_url(target_url, max_pages=4)
+        data = scrape_live_url(target_url, max_pages=max_pages)
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)

@@ -83,16 +83,19 @@ def heal_loop(collector_id: str, target_url: str, max_retries: int = 2, mock: bo
     """
     Main self-healing pipeline iteration loop.
     """
+    from run_scraper import is_placeholder_api_key, is_placeholder_collector, is_studio_ready
+
     bdata = _bdata_bin()
-    sample_collector = not collector_id or str(collector_id).startswith("c_sample")
-    # Use real bdata heal/approve whenever CLI is installed and collector is real.
+    sample_collector = is_placeholder_collector(collector_id)
+    studio_ready = is_studio_ready(collector_id, os.getenv("BRIGHTDATA_API_KEY"))
+    # Use real bdata heal/approve only when CLI, collector, and API key are real.
     # --mock-unhealthy only fakes the first broken scrape payload.
-    use_mock_heal_cli = mock or (bdata is None) or sample_collector
+    use_mock_heal_cli = mock or (bdata is None) or not studio_ready
 
     if bdata is None:
         print("[HEAL_LOOP] ℹ️ 'bdata' CLI not found on PATH. Using Web Unlocker/HTTP; mocking heal/approve CLI only.")
-    elif sample_collector:
-        print("[HEAL_LOOP] ℹ️ Placeholder collector id detected. Create a real scraper with `bdata scraper create` first.")
+    elif sample_collector or is_placeholder_api_key(os.getenv("BRIGHTDATA_API_KEY")):
+        print("[HEAL_LOOP] ℹ️ Bright Data not configured (placeholder key/collector). Using HTTP scrape + mock heal CLI.")
     else:
         print(f"[HEAL_LOOP] ✅ Using Bright Data CLI at: {bdata}")
 
