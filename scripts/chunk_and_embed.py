@@ -7,17 +7,78 @@ and embeds them into a local ChromaDB collection (`docs_rag`) using sentence-tra
 
 import json
 import argparse
+import os
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List, Optional
 
 import chromadb
 from chromadb.utils import embedding_functions
 
 from docs_urls import extract_competitor_tag, normalize_page_url
 
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 DEFAULT_INPUT_PATH = Path(__file__).resolve().parent.parent / "data" / "latest_scrape.json"
 CHROMA_DB_DIR = Path(__file__).resolve().parent.parent / "data" / "chroma_db"
 COLLECTION_NAME = "docs_rag"
+_TEXT_EMBEDDER = None
+
+
+def get_text_embedder():
+    """Load MiniLM once. Prefer SentenceTransformer; fall back to ONNX on Windows/torch errors."""
+    global _TEXT_EMBEDDER
+    if _TEXT_EMBEDDER is not None:
+        return _TEXT_EMBEDDER
+    try:
+        _TEXT_EMBEDDER = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2",
+            device="cpu",
+        )
+        return _TEXT_EMBEDDER
+    except Exception as exc:
+        print(f"[CHUNK_EMBED] ⚠️ SentenceTransformer unavailable ({exc}); using ONNX MiniLM")
+        from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import ONNXMiniLM_L6_V2
+
+        _TEXT_EMBEDDER = ONNXMiniLM_L6_V2()
+        return _TEXT_EMBEDDER
+
+
+def embed_texts(texts: List[str]) -> List[List[float]]:
+    vectors = get_text_embedder()(list(texts))
+    return [v.tolist() if hasattr(v, "tolist") else list(v) for v in vectors]
+
+
+def open_docs_collection(path: Optional[Path] = None):
+    """Open docs_rag without letting a DefaultEmbeddingFunction fallback trigger Chroma config rebuild."""
+    db_path = Path(path) if path else CHROMA_DB_DIR
+    if not db_path.exists():
+        return None
+    client = chromadb.PersistentClient(path=str(db_path))
+    embedder = get_text_embedder()
+    embedder_name = embedder.name() if hasattr(embedder, "name") else ""
+    # Chroma only allows a mismatched handle when the stand-in is named "default".
+    # Query/upsert always pass embeddings, so the handle EF is never used to encode.
+    if embedder_name == "sentence_transformer":
+        collection_ef = embedder
+    else:
+        collection_ef = embedding_functions.DefaultEmbeddingFunction()
+    return client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=collection_ef)
+
+
+def query_collection(
+    collection,
+    query_text: str,
+    where: Optional[Dict[str, Any]] = None,
+    n_results: int = 4,
+):
+    """Query with precomputed embeddings so Chroma does not rebuild sentence_transformer from config."""
+    kwargs: Dict[str, Any] = {
+        "query_embeddings": embed_texts([query_text]),
+        "n_results": n_results,
+    }
+    if where:
+        kwargs["where"] = where
+    return collection.query(**kwargs)
 
 
 def split_text_into_chunks(text: str, chunk_size: int = 500, chunk_overlap: int = 50) -> List[str]:
@@ -118,18 +179,10 @@ def chunk_and_embed(input_path: Path = DEFAULT_INPUT_PATH, competitor_tag: str =
         return 0
 
     CHROMA_DB_DIR.mkdir(parents=True, exist_ok=True)
-    chroma_client = chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
-    
-    try:
-        ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-    except Exception as e:
-        print(f"[CHUNK_EMBED] ⚠️ SentenceTransformer load fallback: {e}")
-        ef = embedding_functions.DefaultEmbeddingFunction()
-
-    collection = chroma_client.get_or_create_collection(
-        name=COLLECTION_NAME,
-        embedding_function=ef
-    )
+    collection = open_docs_collection(CHROMA_DB_DIR)
+    if collection is None:
+        print("[CHUNK_EMBED] ❌ Could not open Chroma collection.")
+        return 0
 
     print(f"[CHUNK_EMBED] ⚙️ Upserting {total_chunks} chunks into ChromaDB collection '{COLLECTION_NAME}'...")
 
@@ -154,6 +207,7 @@ def chunk_and_embed(input_path: Path = DEFAULT_INPUT_PATH, competitor_tag: str =
     collection.upsert(
         documents=documents,
         metadatas=metadatas,
+        embeddings=embed_texts(documents),
         ids=ids
     )
 

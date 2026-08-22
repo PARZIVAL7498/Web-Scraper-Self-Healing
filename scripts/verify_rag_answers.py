@@ -11,15 +11,15 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 load_dotenv(ROOT / ".env")
 
-import chromadb
 import requests
-from chromadb.utils import embedding_functions
+
+from chunk_and_embed import open_docs_collection, query_collection
 
 OUT = ROOT / "docs" / "proof_rag_answers.json"
 
 
 def ask(col, q: str, competitor: str) -> dict:
-    res = col.query(query_texts=[q], where={"competitor": competitor}, n_results=4)
+    res = query_collection(col, q, where={"competitor": competitor}, n_results=4)
     chunks = []
     if res.get("documents") and res["documents"][0]:
         for doc, meta in zip(res["documents"][0], res["metadatas"][0]):
@@ -66,10 +66,7 @@ def ask(col, q: str, competitor: str) -> dict:
 
 
 def main():
-    ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-    col = chromadb.PersistentClient(path=str(ROOT / "data" / "chroma_db")).get_or_create_collection(
-        "docs_rag", embedding_function=ef
-    )
+    col = open_docs_collection(ROOT / "data" / "chroma_db")
     results = [
         ask(col, "how can we use debug in our own code?", "Expressjs"),
         ask(col, "How do I install the DuckDB Python client and what is the minimum Python version?", "Duckdb"),

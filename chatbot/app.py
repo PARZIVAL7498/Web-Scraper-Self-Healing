@@ -21,8 +21,6 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-import chromadb
-from chromadb.utils import embedding_functions
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -30,13 +28,12 @@ load_dotenv(BASE_DIR / ".env")
 DATA_DIR = BASE_DIR / "data"
 CHROMA_DB_DIR = DATA_DIR / "chroma_db"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-COLLECTION_NAME = "docs_rag"
 LAST_HEAL_AT_PATH = DATA_DIR / "last_heal_at.txt"
 
 sys.path.insert(0, str(BASE_DIR / "scripts"))
 sys.path.insert(0, str(BASE_DIR / "chatbot"))
 
-from chunk_and_embed import chunk_and_embed
+from chunk_and_embed import chunk_and_embed, open_docs_collection, query_collection
 from docs_urls import (
     collector_id,
     extract_competitor_tag,
@@ -79,12 +76,7 @@ def get_chroma_collection():
     if not CHROMA_DB_DIR.exists():
         return None
     try:
-        client = chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
-        try:
-            ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-        except Exception:
-            ef = embedding_functions.DefaultEmbeddingFunction()
-        return client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=ef)
+        return open_docs_collection(CHROMA_DB_DIR)
     except Exception as exc:
         print(f"[CHATBOT] ChromaDB connection error: {exc}")
         return None
@@ -230,13 +222,14 @@ def chat(request: ChatRequest):
     try:
         pool = min(12, max(collection.count(), 1)) if collection else 4
         n = pool if specific_page else min(request.top_k or 4, pool)
-        results = collection.query(
-            query_texts=[retrieval_query],
+        results = query_collection(
+            collection,
+            retrieval_query,
             where={"competitor": comp_tag},
             n_results=n,
         ) if collection else {}
         if not results or not results.get("documents") or not results["documents"][0]:
-            results = collection.query(query_texts=[retrieval_query], n_results=n) if collection else {}
+            results = query_collection(collection, retrieval_query, n_results=n) if collection else {}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"ChromaDB query failed: {exc}") from exc
 
@@ -271,8 +264,8 @@ def scrape_and_compare(req: CompareRequest):
         raise HTTPException(status_code=502, detail=f"Compare scrape failed (Studio-first): {exc}") from exc
 
     collection = get_chroma_collection()
-    res_a = collection.query(query_texts=[req.topic], where={"competitor": comp_a}, n_results=3) if collection else {}
-    res_b = collection.query(query_texts=[req.topic], where={"competitor": comp_b}, n_results=3) if collection else {}
+    res_a = query_collection(collection, req.topic, where={"competitor": comp_a}, n_results=3) if collection else {}
+    res_b = query_collection(collection, req.topic, where={"competitor": comp_b}, n_results=3) if collection else {}
     chunks_a = _chunks_from_query(res_a, url_a, comp_a)
     chunks_b = _chunks_from_query(res_b, url_b, comp_b)
     scores_a, scores_b = compute_comparative_scores(chunks_a, chunks_b)
