@@ -6,21 +6,28 @@
     <title>Self-Healing RAG — Bright Data Scraper Studio</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800&family=Syne:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/Beams.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body>
+    <div id="beams-bg" class="beams-bg" aria-hidden="true"></div>
     <div class="app-shell">
-        <aside class="sidebar">
+        <div class="phone-frame">
+            <span class="phone-btn phone-btn-pwr" aria-hidden="true"></span>
+            <span class="phone-btn phone-btn-vol" aria-hidden="true"></span>
+            <div class="phone-notch" aria-hidden="true"><span class="phone-speaker"></span></div>
+            <aside class="sidebar" data-shader-bg="raised">
             <div class="brand-block">
-                <p class="brand-kicker">Bright Data · Scraper Studio</p>
+                <p class="brand-kicker"><span class="hud-live" aria-hidden="true"></span>Bright Data · Scraper Studio</p>
                 <h1 class="brand-name">Self-Healing RAG</h1>
                 <p class="brand-tag">Docs scrape → heal → index → answer</p>
             </div>
 
+            <div class="sidebar-scroll">
             <section class="panel status-panel">
                 <h2 class="panel-title">Pipeline</h2>
                 <div class="status-row">
@@ -71,13 +78,19 @@
                 </div>
                 <pre class="heal-log hidden" id="demo-log" aria-live="polite"></pre>
             </section>
+            </div>
 
             <footer class="sidebar-foot">
                 ChromaDB · <code>bdata</code> CLI · OpenRouter
             </footer>
-        </aside>
+            </aside>
+            <div class="phone-home" aria-hidden="true"></div>
+        </div>
 
-        <main class="main-plane">
+        <div class="phone-frame phone-frame-wide">
+            <span class="phone-btn phone-btn-pwr" aria-hidden="true"></span>
+            <div class="phone-notch" aria-hidden="true"><span class="phone-speaker"></span></div>
+            <main class="main-plane" data-shader-bg="raised">
             <nav class="nav-tabs" role="tablist">
                 <button type="button" class="tab-btn active" id="tab-chat" role="tab">RAG Q&amp;A</button>
                 <button type="button" class="tab-btn" id="tab-compare" role="tab">Live compare</button>
@@ -96,15 +109,15 @@
                     <input
                         type="url"
                         id="chat-url-input"
-                        value="https://expressjs.com/en/guide/using-middleware.html"
-                        placeholder="https://duckdb.org/docs/"
+                        value=""
+                        placeholder="Enter your URL"
                         required
                     />
                 </div>
 
                 <div class="chat-messages" id="chat-messages">
                     <div class="message assistant-message">
-                        <div class="avatar av-bot" aria-hidden="true">SV</div>
+                        <div class="avatar av-bot" aria-hidden="true"><img src="/static/img/bot.jpg" alt=""></div>
                         <div class="message-content">
                             <p>Set a documentation URL, then ask a concrete question. If that site is already indexed, answers come from Chroma immediately—no multi-minute scrape.</p>
                         </div>
@@ -181,9 +194,20 @@
                     </div>
                 </div>
             </div>
-        </main>
+            </main>
+            <div class="phone-home" aria-hidden="true"></div>
+        </div>
     </div>
 
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.167.1/build/three.module.js"
+      }
+    }
+    </script>
+    <script type="module" src="/static/beams.js"></script>
+    <script type="module" src="/static/green-border.js"></script>
     <script src="/static/main.js"></script>
 </body>
 </html>

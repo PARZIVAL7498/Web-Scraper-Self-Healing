@@ -195,7 +195,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const avatarDiv = document.createElement("div");
         avatarDiv.className = `avatar ${role === "user" ? "av-user" : "av-bot"}`;
-        avatarDiv.textContent = role === "user" ? "You" : "SV";
+        if (role === "user") {
+            avatarDiv.textContent = "You";
+        } else {
+            const img = document.createElement("img");
+            img.src = "/static/img/bot.jpg";
+            img.alt = "";
+            avatarDiv.appendChild(img);
+        }
 
         const contentDiv = document.createElement("div");
         contentDiv.className = role === "assistant" ? "message-content markdown-body" : "message-content";
@@ -243,7 +250,10 @@ document.addEventListener("DOMContentLoaded", () => {
         msgDiv.id = id;
         const avatarDiv = document.createElement("div");
         avatarDiv.className = "avatar av-bot";
-        avatarDiv.textContent = "SV";
+        const botImg = document.createElement("img");
+        botImg.src = "/static/img/bot.jpg";
+        botImg.alt = "";
+        avatarDiv.appendChild(botImg);
         const contentDiv = document.createElement("div");
         contentDiv.className = "message-content";
         contentDiv.innerHTML = `<p>Retrieving from index for <b>${targetUrl}</b>…</p>`;
